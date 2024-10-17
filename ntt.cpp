@@ -21,6 +21,17 @@ constexpr U mod=998244353u;
 constexpr U g=3u;
 constexpr U gi=332748118u;
 
+#if defined(_MSC_VER)
+    // MSVC Compiler
+    #define ALWAYS_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC or Clang Compiler
+    #define ALWAYS_INLINE __attribute__((always_inline)) inline
+#else
+    // Other compilers
+    #error "unknown compiler."
+#endif
+
 struct ymm
 {
     __m256i x;
@@ -102,24 +113,6 @@ LL exgcd(LL a,LL b,LL&x,LL&y)
 ymm mogo_n;
 ymm mogo_np;
 
-// inline ymm mul_mod(ymm a,ymm b)
-// {
-//     static constexpr U mask=0xaa;
-
-//     ymm a1=rmov(a,32);
-//     ymm b1=rmov(b,32);
-
-//     ymm t1=a1*b1;
-//     ymm t0=a*b;
-    
-//     ymm abl=blend<mask>(t1,lmov(t2,32));
-//     ymm abh=blend<mask>(rmov(t1,25),lmov(t2,7));
-
-//     ymm ab_p=blend<mask>(rmov(abh*mod_inv_vec,33),rmov(abh,32)*mod_inv_vec>>1);
-//     a=abl-mullo(ab_p,mod_vec);
-//     return jmod(a);
-// }
-
 inline ymm mul_mod(ymm a,ymm b)
 {
     ymm a1=rmov(a,32);
@@ -162,20 +155,11 @@ ymm mogo_to(ymm a)
     ymm t0=a;
     ymm t1=rmov(a,32);
 
-    t0.print64("t0");
-    t1.print64("t1");
-
     ymm q0=t0*mogo_np;
     ymm q1=t1*mogo_np;
 
-    q0.print64("q0");
-    q1.print64("q1");
-
     ymm m0=q0*mogo_n;
     ymm m1=q1*mogo_n;
-
-    m0.print64("m0");
-    m1.print64("m1");
 
     m0=rmov(m0,32);
 
@@ -440,27 +424,136 @@ void write();
 alignas(64) U a[ml+16],b[ml+16],c[ml+16];
 
 
-
-void test()
+template<int n>
+struct ymm_pack
 {
-    ymm a=_mm256_set_epi32(1,2,3,4,5,6,7,8);
-    ymm b=_mm256_set_epi32(2,3,4,5,6,7,8,9);
-    a=to_mogo(a);
-    a.print();
-    b=to_mogo(b);
-    b.print();
-    ymm c=mul_mod(a,b);
-    c.print("c_mogo_val");
-    //c=mogo_to(c);
-    c=mul_mod(c,ymm(1));
-    c.print("c_val");
+    ymm& a[n];
+    
+    template<int... id>
+    ymm_pack shuffle() const
+    {
+        return ymm_pack{a[id]...};
+    }
+};
+
+
+template<typename T>
+T&extract(T&a,int i)
+{
+    return a;
 }
 
+template<int n>
+ymm& extract(ymm_pack<n> a,int i)
+{
+    return a.a[i];
+}
+
+template<int n,auto fun,typename... Args>
+void execute_simd(ymm_pack<n> a,Args... agrs)
+{
+    for(int i=0;i<n;i++)
+        a.a[i]=fun(extract(args,i)...);
+}
+
+void arr_to_mogo1(unsigned*from,unsigned*to,int n)
+{
+    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
+    ymm yip_v=ymm(yip);
+    ymm zero=_mm256_setzero_si256();
+
+    for(int i=0;i+31<n;i++)
+    {
+        ymm x0=_mm256_loadu_si256(from+i+0);
+        ymm x1=_mm256_loadu_si256(from+i+8);
+        ymm x2=_mm256_loadu_si256(from+i+16);
+        ymm x3=_mm256_loadu_si256(from+i+24);
+
+        x0=x0<<2;
+        x1=x1<<2;
+        x2=x2<<2;
+        x3=x3<<2;
+
+        ymm t01=rmov(x0,32);
+        ymm t11=rmov(x1,32);
+        ymm t21=rmov(x2,32);
+        ymm t31=rmov(x3,32);
+
+        ymm t00=x0*yip_v;
+        ymm t10=x1*yip_v;
+        ymm t20=x2*yip_v;
+        ymm t30=x3*yip_v;
+        
+        ymm_pack<4> t0{t00,t10,t20,t30};
+        ymm_pack<4> t1{t00,t11,t21,t31};
+        ymm_pack<4> yip_p{yip_v,yip_v,yip_v,yip_v};
+
+        execute_simd(t0,t0,yip_p);
+
+        t01=t01*yip_v;
+        t11=t11*yip_v;
+        t21=t21*yip_v;
+        t31=t31*yip_v;
+
+        t00=rmov(t00,32);
+        t10=rmov(t10,32);
+        t20=rmov(t20,32);
+        t30=rmov(t30,32);
+
+        t00=t00+x0;
+        t10=t10+x1;
+        t20=t20+x2;
+        t30=t30+x3;
+
+        t01=t01+x0;
+        t11=t11+x1;
+        t21=t21+x2;
+        t31=t31+x3;
+
+        t01=rmov(t01,32);
+        t01=rmov(t11,32);
+        t01=rmov(t21,32);
+        t01=rmov(t31,32);
+
+        t00=t00*mod_vec;
+        t10=t10*mod_vec;
+        t20=t20*mod_vec;
+        t30=t30*mod_vec;
+
+        t01=t01*mod_vec;
+        t11=t11*mod_vec;
+        t21=t21*mod_vec;
+        t31=t31*mod_vec;
+
+        t01=lmov(t01,32);
+        t11=lmov(t11,32);
+        t21=lmov(t21,32);
+        t31=lmov(t31,32);
+
+        x0=blend<0xaa>(t00,t01);
+        x1=blend<0xaa>(t10,t11);
+        x2=blend<0xaa>(t20,t21);
+        x3=blend<0xaa>(t30,t31);
+
+        x0=zero-x0;
+        x1=zero-x1;
+        x2=zero-x2;
+        x3=zero-x3;
+
+        x0.store(to+i+0);
+        x1.store(to+i+8);
+        x2.store(to+i+16);
+        x3.store(to+i+24);
+    }
+}
+
+void arr_to_mogo2(unsigned*from,unsigned*to,int n)
+{
+
+}
 
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 {
-    
-    
     LL r=1ll<<32;
     LL ri,np;
     exgcd(r,mod,ri,np);
@@ -468,22 +561,17 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 
     mogo_np=ymm(np);
     mogo_n=ymm(mod);
-    test();
-    exit(0);
-
-    memcpy(::a,a,(n+1)*4);
-    memcpy(::b,b,(m+1)*4);
-
-    for(int i=0;i<=n;i++)
-        ::a[i]=((UL)::a[i]<<32)%mod;
-    for(int i=0;i<=m;i++)
-        ::b[i]=((UL)::b[i]<<32)%mod;
 
     int len=n+m+1;
     int k=32;
     while(k<len)k<<=1;
+
+    memcpy(::a,a,(n+1)*4);
+    memcpy(::b,b,(m+1)*4);
+
     memset(::a+(n+1),0,(k-n-1)*4);
     memset(::b+(m+1),0,(k-m-1)*4);
+
     init(k);
     NTTfa(::a,k);
     NTTfa(::b,k);
