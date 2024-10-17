@@ -3,6 +3,8 @@
 #include<stdlib.h>
 #include<algorithm>
 #include<random>
+#include<utility>
+#include<concepts>
 #include<immintrin.h>
 #include<emmintrin.h>
 
@@ -39,7 +41,7 @@ struct ymm
     ymm(__m256i x):x(x){}
     ymm(const void*p):x(*(__m256i*)p){}
     ymm(U x):x(_mm256_set1_epi32(x)){}
-    operator __m256i(){return x;}
+    operator __m256i() const {return x;}
     void store(void*p) const {*(__m256i*)p=x;}
     ymm print(const char*desc_str=0) const
     {
@@ -424,11 +426,30 @@ void write();
 alignas(64) U a[ml+16],b[ml+16],c[ml+16];
 
 
+struct ymm_ref
+{
+    ymm&ref;
+};
+
+template<typename T>
+concept ymm_like=
+        std::is_same_v<T,ymm>||
+        std::is_same_v<T,__m256i>||
+        std::is_same_v<T,ymm_ref>;
+
 template<int n>
 struct ymm_pack
 {
-    ymm& a[n];
+    ymm_ref a[n];
     
+    template<typename... Agrs>
+    ymm_pack(ymm_like auto&...args):a{args...}{}
+
+    template<std::size_t... ids>
+    ymm_pack(ymm&mm,std::index_sequence<ids...>):a{(ids,mm)...}{}
+
+    ymm_pack(ymm&mm):ymm_pack(mm,std::make_index_sequence<n>()){}
+
     template<int... id>
     ymm_pack shuffle() const
     {
@@ -438,22 +459,22 @@ struct ymm_pack
 
 
 template<typename T>
-T&extract(T&a,int i)
+ALWAYS_INLINE const T&extract(const T&a,int i)
 {
     return a;
 }
 
 template<int n>
-ymm& extract(ymm_pack<n> a,int i)
+ALWAYS_INLINE const ymm& extract(const ymm_pack<n>&a,int i)
 {
-    return a.a[i];
+    return a.a[i].ref;
 }
 
-template<int n,auto fun,typename... Args>
-void execute_simd(ymm_pack<n> a,Args... agrs)
+template<auto fun,int n,typename... Args>
+ALWAYS_INLINE void execute_simd(ymm_pack<n> a,const Args&... args)
 {
     for(int i=0;i<n;i++)
-        a.a[i]=fun(extract(args,i)...);
+        a.a[i].ref=fun(extract(args,i)...);
 }
 
 void arr_to_mogo1(unsigned*from,unsigned*to,int n)
@@ -464,10 +485,10 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
 
     for(int i=0;i+31<n;i++)
     {
-        ymm x0=_mm256_loadu_si256(from+i+0);
-        ymm x1=_mm256_loadu_si256(from+i+8);
-        ymm x2=_mm256_loadu_si256(from+i+16);
-        ymm x3=_mm256_loadu_si256(from+i+24);
+        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
+        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
+        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
+        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
 
         x0=x0<<2;
         x1=x1<<2;
@@ -483,12 +504,6 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
         ymm t10=x1*yip_v;
         ymm t20=x2*yip_v;
         ymm t30=x3*yip_v;
-        
-        ymm_pack<4> t0{t00,t10,t20,t30};
-        ymm_pack<4> t1{t00,t11,t21,t31};
-        ymm_pack<4> yip_p{yip_v,yip_v,yip_v,yip_v};
-
-        execute_simd(t0,t0,yip_p);
 
         t01=t01*yip_v;
         t11=t11*yip_v;
@@ -548,8 +563,66 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
 }
 
 void arr_to_mogo2(unsigned*from,unsigned*to,int n)
-{
+{ 
+    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
+    ymm yip_v=ymm(yip);
+    ymm zero=_mm256_setzero_si256();
 
+    for(int i=0;i+31<n;i++)
+    {
+        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
+        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
+        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
+        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
+
+        ymm t00,t10,t20,t30;
+        ymm t01,t11,t21,t31;
+
+        ymm_pack<4> px(x0,x1,x2,x3);
+        ymm_pack<4> pt0(t00,t10,t20,t30);
+        ymm_pack<4> pt1(t01,t11,t21,t31);
+
+        execute_simd<_mm256_srli_epi32>(px,px,2);
+        execute_simd<rmov>(pt1,px,32);
+        execute_simd<_mm256_mul_epu32>(pt0,px,yip_v);
+        execute_simd<_mm256_mul_epu32>(pt1,px,yip_v);
+        execute_simd<rmov>(pt0,pt0,32);
+        execute_simd<_mm256_add_epi32>(pt0,pt0,px);
+        execute_simd<_mm256_add_epi32>(pt1,pt1,px);
+        execute_simd<rmov>(pt1,pt1,32);
+        execute_simd<_mm256_mul_epu32>(pt0,pt0,mod_vec);
+        execute_simd<_mm256_mul_epu32>(pt1,pt1,mod_vec);
+        execute_simd<lmov>(pt1,pt1,32);
+        execute_simd<blend<0xaa>>(px,pt0,pt1);
+        execute_simd<_mm256_sub_epi32>(px,zero,px);
+
+        x0.store(to+i+0);
+        x1.store(to+i+8);
+        x2.store(to+i+16);
+        x3.store(to+i+24);
+    }
+}
+
+void test()
+{
+    unsigned a[32];
+    for(int i=0;i<32;i++)
+        a[i]=i;
+
+    arr_to_mogo2(a,::a,32);
+
+    for(int i=0;i<32;i++)
+        printf("%u ",::a[i]);
+    puts("");
+
+    for(int i=0;i<32;i+=8)
+    {
+        mogo_to(ymm(::a+i)).store(::a+i);
+    }
+
+    for(int i=0;i<32;i++)
+        printf("%u ",::a[i]);
+    puts("");
 }
 
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
@@ -561,6 +634,9 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 
     mogo_np=ymm(np);
     mogo_n=ymm(mod);
+
+    test();
+    exit(0);
 
     int len=n+m+1;
     int k=32;
