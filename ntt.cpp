@@ -153,10 +153,8 @@ ymm to_mogo(ymm a)
     t1=t1+x;
     t1=rmov(t1,32);
     t0=t0*mod_vec;
-    t0.print64("t0");
     t1=t1*mod_vec;
-    t1.print64("t1");
-    return a-blend<0xaa>(t0,lmov(t1,32));
+    return _mm256_setzero_si256()-blend<0xaa>(t0,lmov(t1,32));
 }
 
 ymm mogo_to(ymm a)
