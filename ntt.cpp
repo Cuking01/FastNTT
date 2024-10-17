@@ -473,8 +473,14 @@ ALWAYS_INLINE const ymm& extract(const ymm_pack<n>&a,int i)
 template<auto fun,int n,typename... Args>
 ALWAYS_INLINE void execute_simd(ymm_pack<n> a,const Args&... args)
 {
+
     for(int i=0;i<n;i++)
         a.a[i].ref=fun(extract(args,i)...);
+
+    // a.a[0].ref=fun(extract(args,0)...);
+    // a.a[1].ref=fun(extract(args,1)...);
+    // a.a[2].ref=fun(extract(args,2)...);
+    // a.a[3].ref=fun(extract(args,3)...);
 }
 
 void arr_to_mogo1(unsigned*from,unsigned*to,int n)
@@ -483,7 +489,7 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
     ymm yip_v=ymm(yip);
     ymm zero=_mm256_setzero_si256();
 
-    for(int i=0;i+31<n;i++)
+    for(int i=0;i+31<n;i+=32)
     {
         ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
         ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
@@ -526,9 +532,9 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
         t31=t31+x3;
 
         t01=rmov(t01,32);
-        t01=rmov(t11,32);
-        t01=rmov(t21,32);
-        t01=rmov(t31,32);
+        t11=rmov(t11,32);
+        t21=rmov(t21,32);
+        t31=rmov(t31,32);
 
         t00=t00*mod_vec;
         t10=t10*mod_vec;
@@ -568,7 +574,7 @@ void arr_to_mogo2(unsigned*from,unsigned*to,int n)
     ymm yip_v=ymm(yip);
     ymm zero=_mm256_setzero_si256();
 
-    for(int i=0;i+31<n;i++)
+    for(int i=0;i+31<n;i+=32)
     {
         ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
         ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
@@ -582,7 +588,7 @@ void arr_to_mogo2(unsigned*from,unsigned*to,int n)
         ymm_pack<4> pt0(t00,t10,t20,t30);
         ymm_pack<4> pt1(t01,t11,t21,t31);
 
-        execute_simd<_mm256_srli_epi32>(px,px,2);
+        execute_simd<_mm256_slli_epi32>(px,px,2);
         execute_simd<rmov>(pt1,px,32);
         execute_simd<_mm256_mul_epu32>(pt0,px,yip_v);
         execute_simd<_mm256_mul_epu32>(pt1,px,yip_v);
@@ -605,24 +611,20 @@ void arr_to_mogo2(unsigned*from,unsigned*to,int n)
 
 void test()
 {
-    unsigned a[32];
-    for(int i=0;i<32;i++)
+    U a[128];
+    for(int i=0;i<128;i++)
         a[i]=i;
+    arr_to_mogo2(a,::a,128);
 
-    arr_to_mogo2(a,::a,32);
-
-    for(int i=0;i<32;i++)
-        printf("%u ",::a[i]);
-    puts("");
-
-    for(int i=0;i<32;i+=8)
+    for(int i=0;i<128;i+=8)
     {
         mogo_to(ymm(::a+i)).store(::a+i);
     }
 
-    for(int i=0;i<32;i++)
-        printf("%u ",::a[i]);
-    puts("");
+    for(int i=0;i<128;i++)
+    {
+        printf("%d\n",::a[i]);
+    }
 }
 
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
@@ -635,28 +637,41 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     mogo_np=ymm(np);
     mogo_n=ymm(mod);
 
-    test();
-    exit(0);
+    // test();
+    // exit(0);
 
-    int len=n+m+1;
-    int k=32;
-    while(k<len)k<<=1;
+    for(int i=0;i<200;i++)
+        arr_to_mogo1(a,::a,n+1);
 
-    memcpy(::a,a,(n+1)*4);
-    memcpy(::b,b,(m+1)*4);
+    // for(int i=0;i<200;i++)
+    // {
+    //     for(int j=0;j<=n;j+=8)
+    //     {
+    //         ymm tmp=_mm256_loadu_si256((__m256i*)(a+j));
+    //         to_mogo(tmp).store(::a+j);
+    //     }
+        
+    // }
 
-    memset(::a+(n+1),0,(k-n-1)*4);
-    memset(::b+(m+1),0,(k-m-1)*4);
+    // int len=n+m+1;
+    // int k=32;
+    // while(k<len)k<<=1;
 
-    init(k);
-    NTTfa(::a,k);
-    NTTfa(::b,k);
-    for(S i=0;i<k;i+=8)
-        mul_mod(::a+i,::b+i).store(::c+i);
-    NTTifa(::c,k);
-    for(int i=0;i<k;i+=8)
-        mogo_to(ymm(::c+i)).store(::c+i);
-    memcpy(c,::c,len*4);
+    // memcpy(::a,a,(n+1)*4);
+    // memcpy(::b,b,(m+1)*4);
+
+    // memset(::a+(n+1),0,(k-n-1)*4);
+    // memset(::b+(m+1),0,(k-m-1)*4);
+
+    // init(k);
+    // NTTfa(::a,k);
+    // NTTfa(::b,k);
+    // for(S i=0;i<k;i+=8)
+    //     mul_mod(::a+i,::b+i).store(::c+i);
+    // NTTifa(::c,k);
+    // for(int i=0;i<k;i+=8)
+    //     mogo_to(ymm(::c+i)).store(::c+i);
+    // memcpy(c,::c,len*4);
 }
 
 /*
