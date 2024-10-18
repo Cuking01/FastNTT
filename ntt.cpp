@@ -42,7 +42,9 @@ struct ymm
     ymm(const void*p):x(*(__m256i*)p){}
     ymm(U x):x(_mm256_set1_epi32(x)){}
     operator __m256i() const {return x;}
-    void store(void*p) const {*(__m256i*)p=x;}
+    void store(void*p) const {_mm256_store_si256((__m256i*)p,x);}
+    void storeu(void*p) const {_mm256_storeu_si256((__m256i*)p,x);}
+    void stream(void*p) const {_mm256_stream_si256((__m256i*)p,x);}
     ymm print(const char*desc_str=0) const
     {
         alignas(64) unsigned tmp[8];
@@ -184,6 +186,258 @@ S up(S x){S l=1;while(l<x)l<<=1;return l;}
 constexpr S ml=1<<24;
 alignas(64) U wr[ml+16],wi[ml+16];
 
+
+
+int n,m;
+char buf[500000];
+char wbuf[2000000];
+void read();
+void write();
+#define TEST_JUDGE 1000000
+alignas(64) U a[ml+16],b[ml+16],c[ml+16];
+
+
+struct ymm_ref
+{
+    ymm&ref;
+};
+
+template<typename T>
+concept ymm_like=
+        std::is_same_v<T,ymm>||
+        std::is_same_v<T,__m256i>||
+        std::is_same_v<T,ymm_ref>;
+
+template<int n>
+struct ymm_pack
+{
+    ymm_ref a[n];
+    
+    template<typename... Agrs>
+    ymm_pack(ymm_like auto&...args):a{args...}{}
+
+    template<std::size_t... ids>
+    ymm_pack(ymm&mm,std::index_sequence<ids...>):a{(ids,mm)...}{}
+
+    ymm_pack(ymm&mm):ymm_pack(mm,std::make_index_sequence<n>()){}
+
+    template<int... id>
+    ymm_pack shuffle() const
+    {
+        return ymm_pack{a[id]...};
+    }
+};
+
+
+template<typename T>
+ALWAYS_INLINE const T&extract(const T&a,int i)
+{
+    return a;
+}
+
+template<int n>
+ALWAYS_INLINE const ymm& extract(const ymm_pack<n>&a,int i)
+{
+    return a.a[i].ref;
+}
+
+template<auto fun,int n,typename... Args>
+ALWAYS_INLINE void execute_simd(ymm_pack<n> a,const Args&... args)
+{
+    for(int i=0;i<n;i++)
+        a.a[i].ref=fun(extract(args,i)...);
+}
+
+void arr_to_mogo1(unsigned*from,unsigned*to,int n)
+{
+    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
+    ymm yip_v=ymm(yip);
+    ymm zero=_mm256_setzero_si256();
+    ymm mod_vec=::mod_vec;
+    for(int i=0;i+31<n;i+=32)
+    {
+        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
+        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
+        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
+        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
+
+        x0=x0<<2;
+        x1=x1<<2;
+        x2=x2<<2;
+        x3=x3<<2;
+
+        ymm t01=rmov(x0,32);
+        ymm t11=rmov(x1,32);
+        ymm t21=rmov(x2,32);
+        ymm t31=rmov(x3,32);
+
+        ymm t00=x0*yip_v;
+        ymm t10=x1*yip_v;
+        ymm t20=x2*yip_v;
+        ymm t30=x3*yip_v;
+
+        t01=t01*yip_v;
+        t11=t11*yip_v;
+        t21=t21*yip_v;
+        t31=t31*yip_v;
+
+        t00=rmov(t00,32);
+        t10=rmov(t10,32);
+        t20=rmov(t20,32);
+        t30=rmov(t30,32);
+
+        t00=t00+x0;
+        t10=t10+x1;
+        t20=t20+x2;
+        t30=t30+x3;
+
+        t01=t01+x0;
+        t11=t11+x1;
+        t21=t21+x2;
+        t31=t31+x3;
+
+        t01=rmov(t01,32);
+        t11=rmov(t11,32);
+        t21=rmov(t21,32);
+        t31=rmov(t31,32);
+
+        t00=t00*mod_vec;
+        t10=t10*mod_vec;
+        t20=t20*mod_vec;
+        t30=t30*mod_vec;
+
+        t01=t01*mod_vec;
+        t11=t11*mod_vec;
+        t21=t21*mod_vec;
+        t31=t31*mod_vec;
+
+        t01=lmov(t01,32);
+        t11=lmov(t11,32);
+        t21=lmov(t21,32);
+        t31=lmov(t31,32);
+
+        x0=blend<0xaa>(t00,t01);
+        x1=blend<0xaa>(t10,t11);
+        x2=blend<0xaa>(t20,t21);
+        x3=blend<0xaa>(t30,t31);
+
+        x0=zero-x0;
+        x1=zero-x1;
+        x2=zero-x2;
+        x3=zero-x3;
+
+        x0.store(to+i+0);
+        x1.store(to+i+8);
+        x2.store(to+i+16);
+        x3.store(to+i+24);
+    }
+}
+
+void arr_to_mogo2(unsigned*from,unsigned*to,int n)
+{ 
+    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
+    ymm yip_v=ymm(yip);
+    ymm zero=_mm256_setzero_si256();
+
+    for(int i=0;i+31<n;i+=32)
+    {
+        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
+        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
+        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
+        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
+        _mm_prefetch(from+i+32,_MM_HINT_T0);
+        _mm_prefetch(from+i+48,_MM_HINT_T0);
+        ymm t00,t10,t20,t30;
+        ymm t01,t11,t21,t31;
+
+        ymm_pack<4> px(x0,x1,x2,x3);
+        ymm_pack<4> pt0(t00,t10,t20,t30);
+        ymm_pack<4> pt1(t01,t11,t21,t31);
+
+        execute_simd<_mm256_slli_epi32>(px,px,2);
+        execute_simd<rmov>(pt1,px,32);
+        execute_simd<_mm256_mul_epu32>(pt0,px,yip_v);
+        execute_simd<_mm256_mul_epu32>(pt1,px,yip_v);
+        execute_simd<rmov>(pt0,pt0,32);
+        execute_simd<_mm256_add_epi32>(pt0,pt0,px);
+        execute_simd<_mm256_add_epi32>(pt1,pt1,px);
+        execute_simd<rmov>(pt1,pt1,32);
+        execute_simd<_mm256_mul_epu32>(pt0,pt0,mod_vec);
+        execute_simd<_mm256_mul_epu32>(pt1,pt1,mod_vec);
+        execute_simd<lmov>(pt1,pt1,32);
+        execute_simd<blend<0xaa>>(px,pt0,pt1);
+        execute_simd<_mm256_sub_epi32>(px,zero,px);
+
+        // _mm256_stream_si256((__m256i*)(to+i+0),x0);
+        // _mm256_stream_si256((__m256i*)(to+i+8),x1);
+        // _mm256_stream_si256((__m256i*)(to+i+16),x2);
+        // _mm256_stream_si256((__m256i*)(to+i+24),x3);
+
+
+        x0.store(to+i+0);
+        x1.store(to+i+8);
+        x2.store(to+i+16);
+        x3.store(to+i+24);
+    }
+}
+
+void arr_mogo_to0(unsigned*from,unsigned*to,int n)
+{
+    for(int i=0;i<n;i+=8)
+    {
+        ymm t(from+i);
+        t=mogo_to(t);
+        t.storeu(to+i);
+    }
+}
+
+void arr_mogo_to1(unsigned*from,unsigned*to,int n)
+{
+    ymm mogo_np=::mogo_np;
+    ymm mogo_n=::mogo_n;
+    ymm mod1_vec(mod-1);
+    int i;
+    for(i=0;i+31<n;i+=40)
+    {
+        ymm t00(from+i+0);
+        ymm t01(from+i+8);
+        ymm t02(from+i+16);
+        ymm t03(from+i+24);
+        ymm t04(from+i+32);
+
+        ymm t10,t11,t12,t13,t14;
+
+        ymm_pack<5> pt0(t00,t01,t02,t03,t04);
+        ymm_pack<5> pt1(t10,t11,t12,t13,t14);
+
+        execute_simd<rmov>(pt1,pt0,32);
+        execute_simd<_mm256_mul_epu32>(pt0,pt0,mogo_np);
+        execute_simd<_mm256_mul_epu32>(pt1,pt1,mogo_np);
+        execute_simd<_mm256_mul_epu32>(pt0,pt0,mogo_n);
+        execute_simd<_mm256_mul_epu32>(pt1,pt1,mogo_n);
+        execute_simd<rmov>(pt0,pt0,32);
+        execute_simd<blend<0xaa>>(pt0,pt0,pt1);
+        execute_simd<_mm256_sub_epi32>(pt0,mogo_n,pt0);
+        execute_simd<_mm256_cmpgt_epi32>(pt1,pt0,mod1_vec);
+        execute_simd<_mm256_and_si256>(pt1,pt1,mogo_n);
+        execute_simd<_mm256_sub_epi32>(pt0,pt0,pt1);
+
+        t00.storeu(to+i+0);
+        t01.storeu(to+i+8);
+        t02.storeu(to+i+16);
+        t03.storeu(to+i+24);
+        t04.storeu(to+i+32);
+    }
+
+    for(;i<n;i+=8)
+    {
+        ymm t(from+i);
+        t=mogo_to(t);
+        t.storeu(to+i);
+    }
+}
+
+
 void init(S ml)
 {
     for(S len=1;len<ml;len<<=1)
@@ -210,6 +464,13 @@ void init(S ml)
                 }
             }
             ymm tr(wr+len),ti(wi+len),Wr_vec(pow(Wr,8)),Wi_vec(pow(Wi,8));
+            tr=to_mogo(tr);
+            ti=to_mogo(ti);
+            Wr_vec=to_mogo(Wr_vec);
+            Wi_vec=to_mogo(Wi_vec);
+            tr.store(wr+len);
+            ti.store(wi+len);
+            
             for(int i=8;i<len;i+=8)
             {
                 tr=mul_mod(Wr_vec,tr);tr.store(wr+len+i);
@@ -217,6 +478,8 @@ void init(S ml)
             }
         }
     }
+    to_mogo(ymm(wr)).store(wr);
+    to_mogo(ymm(wi)).store(wi);
 }
 void NTTfa(U*a,S len)
 {
@@ -417,213 +680,19 @@ void NTTifa(U*a,S len)
     */
 }
 
-int n,m;
-char buf[500000];
-char wbuf[2000000];
-void read();
-void write();
-#define TEST_JUDGE 1000000
-alignas(64) U a[ml+16],b[ml+16],c[ml+16];
-
-
-struct ymm_ref
-{
-    ymm&ref;
-};
-
-template<typename T>
-concept ymm_like=
-        std::is_same_v<T,ymm>||
-        std::is_same_v<T,__m256i>||
-        std::is_same_v<T,ymm_ref>;
-
-template<int n>
-struct ymm_pack
-{
-    ymm_ref a[n];
-    
-    template<typename... Agrs>
-    ymm_pack(ymm_like auto&...args):a{args...}{}
-
-    template<std::size_t... ids>
-    ymm_pack(ymm&mm,std::index_sequence<ids...>):a{(ids,mm)...}{}
-
-    ymm_pack(ymm&mm):ymm_pack(mm,std::make_index_sequence<n>()){}
-
-    template<int... id>
-    ymm_pack shuffle() const
-    {
-        return ymm_pack{a[id]...};
-    }
-};
-
-
-template<typename T>
-ALWAYS_INLINE const T&extract(const T&a,int i)
-{
-    return a;
-}
-
-template<int n>
-ALWAYS_INLINE const ymm& extract(const ymm_pack<n>&a,int i)
-{
-    return a.a[i].ref;
-}
-
-template<auto fun,int n,typename... Args>
-ALWAYS_INLINE void execute_simd(ymm_pack<n> a,const Args&... args)
-{
-
-    for(int i=0;i<n;i++)
-        a.a[i].ref=fun(extract(args,i)...);
-
-    // a.a[0].ref=fun(extract(args,0)...);
-    // a.a[1].ref=fun(extract(args,1)...);
-    // a.a[2].ref=fun(extract(args,2)...);
-    // a.a[3].ref=fun(extract(args,3)...);
-}
-
-void arr_to_mogo1(unsigned*from,unsigned*to,int n)
-{
-    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
-    ymm yip_v=ymm(yip);
-    ymm zero=_mm256_setzero_si256();
-
-    for(int i=0;i+31<n;i+=32)
-    {
-        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
-        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
-        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
-        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
-
-        x0=x0<<2;
-        x1=x1<<2;
-        x2=x2<<2;
-        x3=x3<<2;
-
-        ymm t01=rmov(x0,32);
-        ymm t11=rmov(x1,32);
-        ymm t21=rmov(x2,32);
-        ymm t31=rmov(x3,32);
-
-        ymm t00=x0*yip_v;
-        ymm t10=x1*yip_v;
-        ymm t20=x2*yip_v;
-        ymm t30=x3*yip_v;
-
-        t01=t01*yip_v;
-        t11=t11*yip_v;
-        t21=t21*yip_v;
-        t31=t31*yip_v;
-
-        t00=rmov(t00,32);
-        t10=rmov(t10,32);
-        t20=rmov(t20,32);
-        t30=rmov(t30,32);
-
-        t00=t00+x0;
-        t10=t10+x1;
-        t20=t20+x2;
-        t30=t30+x3;
-
-        t01=t01+x0;
-        t11=t11+x1;
-        t21=t21+x2;
-        t31=t31+x3;
-
-        t01=rmov(t01,32);
-        t11=rmov(t11,32);
-        t21=rmov(t21,32);
-        t31=rmov(t31,32);
-
-        t00=t00*mod_vec;
-        t10=t10*mod_vec;
-        t20=t20*mod_vec;
-        t30=t30*mod_vec;
-
-        t01=t01*mod_vec;
-        t11=t11*mod_vec;
-        t21=t21*mod_vec;
-        t31=t31*mod_vec;
-
-        t01=lmov(t01,32);
-        t11=lmov(t11,32);
-        t21=lmov(t21,32);
-        t31=lmov(t31,32);
-
-        x0=blend<0xaa>(t00,t01);
-        x1=blend<0xaa>(t10,t11);
-        x2=blend<0xaa>(t20,t21);
-        x3=blend<0xaa>(t30,t31);
-
-        x0=zero-x0;
-        x1=zero-x1;
-        x2=zero-x2;
-        x3=zero-x3;
-
-        x0.store(to+i+0);
-        x1.store(to+i+8);
-        x2.store(to+i+16);
-        x3.store(to+i+24);
-    }
-}
-
-void arr_to_mogo2(unsigned*from,unsigned*to,int n)
-{ 
-    static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
-    ymm yip_v=ymm(yip);
-    ymm zero=_mm256_setzero_si256();
-
-    for(int i=0;i+31<n;i+=32)
-    {
-        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
-        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
-        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
-        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
-
-        ymm t00,t10,t20,t30;
-        ymm t01,t11,t21,t31;
-
-        ymm_pack<4> px(x0,x1,x2,x3);
-        ymm_pack<4> pt0(t00,t10,t20,t30);
-        ymm_pack<4> pt1(t01,t11,t21,t31);
-
-        execute_simd<_mm256_slli_epi32>(px,px,2);
-        execute_simd<rmov>(pt1,px,32);
-        execute_simd<_mm256_mul_epu32>(pt0,px,yip_v);
-        execute_simd<_mm256_mul_epu32>(pt1,px,yip_v);
-        execute_simd<rmov>(pt0,pt0,32);
-        execute_simd<_mm256_add_epi32>(pt0,pt0,px);
-        execute_simd<_mm256_add_epi32>(pt1,pt1,px);
-        execute_simd<rmov>(pt1,pt1,32);
-        execute_simd<_mm256_mul_epu32>(pt0,pt0,mod_vec);
-        execute_simd<_mm256_mul_epu32>(pt1,pt1,mod_vec);
-        execute_simd<lmov>(pt1,pt1,32);
-        execute_simd<blend<0xaa>>(px,pt0,pt1);
-        execute_simd<_mm256_sub_epi32>(px,zero,px);
-
-        x0.store(to+i+0);
-        x1.store(to+i+8);
-        x2.store(to+i+16);
-        x3.store(to+i+24);
-    }
-}
 
 void test()
 {
-    U a[128];
+    alignas(64) U a[128];
     for(int i=0;i<128;i++)
         a[i]=i;
     arr_to_mogo2(a,::a,128);
 
-    for(int i=0;i<128;i+=8)
-    {
-        mogo_to(ymm(::a+i)).store(::a+i);
-    }
+    arr_mogo_to1(::a,a,128);
 
     for(int i=0;i<128;i++)
     {
-        printf("%d\n",::a[i]);
+        printf("%d\n",a[i]);
     }
 }
 
@@ -640,38 +709,30 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     // test();
     // exit(0);
 
-    for(int i=0;i<200;i++)
-        arr_to_mogo1(a,::a,n+1);
-
     // for(int i=0;i<200;i++)
     // {
-    //     for(int j=0;j<=n;j+=8)
-    //     {
-    //         ymm tmp=_mm256_loadu_si256((__m256i*)(a+j));
-    //         to_mogo(tmp).store(::a+j);
-    //     }
-        
+    //     //arr_to_mogo2(a,::a,n+1);
+    //     arr_mogo_to1(::a,a,n+1);
     // }
 
-    // int len=n+m+1;
-    // int k=32;
-    // while(k<len)k<<=1;
+    arr_to_mogo2(a,::a,n+1);
+    arr_to_mogo2(b,::b,n+1);
 
-    // memcpy(::a,a,(n+1)*4);
-    // memcpy(::b,b,(m+1)*4);
+    int len=n+m+1;
+    int k=32;
+    while(k<len)k<<=1;
 
-    // memset(::a+(n+1),0,(k-n-1)*4);
-    // memset(::b+(m+1),0,(k-m-1)*4);
+    memset(::a+(n+1),0,(k-n-1)*4);
+    memset(::b+(m+1),0,(k-m-1)*4);
 
-    // init(k);
-    // NTTfa(::a,k);
-    // NTTfa(::b,k);
-    // for(S i=0;i<k;i+=8)
-    //     mul_mod(::a+i,::b+i).store(::c+i);
-    // NTTifa(::c,k);
-    // for(int i=0;i<k;i+=8)
-    //     mogo_to(ymm(::c+i)).store(::c+i);
-    // memcpy(c,::c,len*4);
+    init(k);
+    NTTfa(::a,k);
+    NTTfa(::b,k);
+    for(S i=0;i<k;i+=8)
+        mul_mod(::a+i,::b+i).store(::c+i);
+    NTTifa(::c,k);
+    
+    arr_mogo_to(::c,c,k);
 }
 
 /*

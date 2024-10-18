@@ -61,7 +61,7 @@ void test(int n)
 
 int main()
 {
-	for(int i=1<<8;i<(1<<20);i<<=1)
+	for(int i=1<<8;i<=(1<<21);i<<=1)
 	{
 		test(i);
 	}
