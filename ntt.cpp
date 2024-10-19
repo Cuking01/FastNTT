@@ -42,6 +42,8 @@ struct ymm
     ymm(const void*p):x(*(__m256i*)p){}
     ymm(U x):x(_mm256_set1_epi32(x)){}
     operator __m256i() const {return x;}
+    void load(const void*p){x=_mm256_load_si256((__m256i*)p);}
+    void loadu(const void*p){x=_mm256_loadu_si256((__m256i*)p);}
     void store(void*p) const {_mm256_store_si256((__m256i*)p,x);}
     void storeu(void*p) const {_mm256_storeu_si256((__m256i*)p,x);}
     void stream(void*p) const {_mm256_stream_si256((__m256i*)p,x);}
@@ -196,6 +198,126 @@ void write();
 #define TEST_JUDGE 1000000
 alignas(64) U a[ml+16],b[ml+16],c[ml+16];
 
+template<typename T>
+concept Pointer=std::is_pointer_v<T>;
+
+template<typename T>
+struct is_const_pointer: std::false_type{};
+
+template<typename T>
+struct is_const_pointer<const T*>: std::true_type{};
+
+template<typename T>
+constexpr bool is_const_pointer_v=is_const_pointer<T>::value;
+
+template<typename T>
+concept CPointer=is_const_pointer_v<T>;
+
+template<int n>
+struct ymms
+{
+    ymm mm[n];
+
+    ymms(){}
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE ymms(const ymm*p,std::index_sequence<ids...>):mm{(p+ids)...}{}
+
+    ALWAYS_INLINE ymms(const void*p):ymm((ymm*)p,std::make_index_sequence<n>()){}
+    
+    template<Pointer... Args>
+    ALWAYS_INLINE ymms(Args... p):mm{p...}{}
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE void load_impl(void*p,std::index_sequence<ids...>)
+    {
+        ((mm[ids].load((ymm*)p+ids)),...);
+    }
+
+    ALWAYS_INLINE void load(void*p)
+    {
+        load_impl(p,std::make_index_sequence<n>());
+    }
+
+    template<Pointer... Args>
+    ALWAYS_INLINE void load(Args... p) requires (sizeof...(Args)==n)
+    {
+        int cnt=0;
+        ((mm[cnt++].load(p)),...);
+    }
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE void loadu_impl(const void*p,std::index_sequence<ids...>)
+    {
+        ((mm[ids].loadu((ymm*)p+ids)),...);
+    }
+
+    ALWAYS_INLINE void loadu(const void*p)
+    {
+        loadu_impl(p,std::make_index_sequence<n>());
+    }
+
+    template<Pointer... Args>
+    ALWAYS_INLINE void loadu(Args... p) requires (sizeof...(Args)==n)
+    {
+        int cnt=0;
+        ((mm[cnt++].loadu(p)),...);
+    }
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE void store_impl(void*p,std::index_sequence<ids...>)
+    {
+        ((mm[ids].store((ymm*)p+ids)),...);
+    }
+
+    ALWAYS_INLINE void store(void*p)
+    {
+        store_impl(p,std::make_index_sequence<n>());
+    }
+
+    template<Pointer... Args>
+    ALWAYS_INLINE void store(Args... p) requires (sizeof...(Args)==n)
+    {
+        int cnt=0;
+        ((mm[cnt++].store(p)),...);
+    }
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE void storeu_impl(void*p,std::index_sequence<ids...>)
+    {
+        ((mm[ids].storeu((ymm*)p+ids)),...);
+    }
+
+    ALWAYS_INLINE void storeu(void*p)
+    {
+        storeu_impl(p,std::make_index_sequence<n>());
+    }
+
+    template<Pointer... Args>
+    ALWAYS_INLINE void storeu(Args... p) requires (sizeof...(Args)==n)
+    {
+        int cnt=0;
+        ((mm[cnt++].storeu(p)),...);
+    }
+
+    template<std::size_t... ids>
+    ALWAYS_INLINE void stream_impl(void*p,std::index_sequence<ids...>)
+    {
+        ((mm[ids].stream((ymm*)p+ids)),...);
+    }
+
+    ALWAYS_INLINE void stream(void*p)
+    {
+        stream_impl(p,std::make_index_sequence<n>());
+    }
+
+    template<Pointer... Args>
+    ALWAYS_INLINE void stream(Args... p) requires (sizeof...(Args)==n)
+    {
+        int cnt=0;
+        ((mm[cnt++].stream(p)),...);
+    }
+};
 
 struct ymm_ref
 {
@@ -211,20 +333,20 @@ concept ymm_like=
 template<int n>
 struct ymm_pack
 {
-    ymm_ref a[n];
-    
+    ymm_ref ref[n];
+
     template<typename... Agrs>
-    ymm_pack(ymm_like auto&...args):a{args...}{}
+    ymm_pack(ymm_like auto&...args):ref{args...}{}
 
     template<std::size_t... ids>
-    ymm_pack(ymm&mm,std::index_sequence<ids...>):a{(ids,mm)...}{}
+    ymm_pack(ymms<n>&mms,std::index_sequence<ids...>):ref{mms.mm[ids]...}{}
 
-    ymm_pack(ymm&mm):ymm_pack(mm,std::make_index_sequence<n>()){}
+    ymm_pack(ymms<n>&mms):ymm_pack(mms,std::make_index_sequence<n>()){}
 
     template<int... id>
     ymm_pack shuffle() const
     {
-        return ymm_pack{a[id]...};
+        return ymm_pack{ref[id]...};
     }
 };
 
@@ -238,14 +360,14 @@ ALWAYS_INLINE const T&extract(const T&a,int i)
 template<int n>
 ALWAYS_INLINE const ymm& extract(const ymm_pack<n>&a,int i)
 {
-    return a.a[i].ref;
+    return a.ref[i].ref;
 }
 
 template<auto fun,int n,typename... Args>
 ALWAYS_INLINE void execute_simd(ymm_pack<n> a,const Args&... args)
 {
     for(int i=0;i<n;i++)
-        a.a[i].ref=fun(extract(args,i)...);
+        a.ref[i].ref=fun(extract(args,i)...);
 }
 
 void arr_to_mogo1(unsigned*from,unsigned*to,int n)
@@ -341,18 +463,9 @@ void arr_to_mogo2(unsigned*from,unsigned*to,int n)
 
     for(int i=0;i+31<n;i+=32)
     {
-        ymm x0=_mm256_loadu_si256((__m256i*)(from+i+0));
-        ymm x1=_mm256_loadu_si256((__m256i*)(from+i+8));
-        ymm x2=_mm256_loadu_si256((__m256i*)(from+i+16));
-        ymm x3=_mm256_loadu_si256((__m256i*)(from+i+24));
-        _mm_prefetch(from+i+32,_MM_HINT_T0);
-        _mm_prefetch(from+i+48,_MM_HINT_T0);
-        ymm t00,t10,t20,t30;
-        ymm t01,t11,t21,t31;
-
-        ymm_pack<4> px(x0,x1,x2,x3);
-        ymm_pack<4> pt0(t00,t10,t20,t30);
-        ymm_pack<4> pt1(t01,t11,t21,t31);
+        ymms<4> x,t0,t1;
+        ymm_pack<4> px(x),pt0(t0),pt1(t1);
+        x.loadu(from+i);
 
         execute_simd<_mm256_slli_epi32>(px,px,2);
         execute_simd<rmov>(pt1,px,32);
@@ -368,16 +481,7 @@ void arr_to_mogo2(unsigned*from,unsigned*to,int n)
         execute_simd<blend<0xaa>>(px,pt0,pt1);
         execute_simd<_mm256_sub_epi32>(px,zero,px);
 
-        // _mm256_stream_si256((__m256i*)(to+i+0),x0);
-        // _mm256_stream_si256((__m256i*)(to+i+8),x1);
-        // _mm256_stream_si256((__m256i*)(to+i+16),x2);
-        // _mm256_stream_si256((__m256i*)(to+i+24),x3);
-
-
-        x0.store(to+i+0);
-        x1.store(to+i+8);
-        x2.store(to+i+16);
-        x3.store(to+i+24);
+        x.store(to+i);
     }
 }
 
@@ -709,30 +813,31 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     // test();
     // exit(0);
 
-    // for(int i=0;i<200;i++)
-    // {
-    //     //arr_to_mogo2(a,::a,n+1);
-    //     arr_mogo_to1(::a,a,n+1);
-    // }
+    for(int i=0;i<200;i++)
+    {
+        arr_to_mogo2(a,::a,n+1);
+        //arr_to_mogo1(a,::a,n+1);
+        //arr_mogo_to1(::a,a,n+1);
+    }
 
-    arr_to_mogo2(a,::a,n+1);
-    arr_to_mogo2(b,::b,n+1);
+    // arr_to_mogo2(a,::a,n+1);
+    // arr_to_mogo2(b,::b,n+1);
 
-    int len=n+m+1;
-    int k=32;
-    while(k<len)k<<=1;
+    // int len=n+m+1;
+    // int k=32;
+    // while(k<len)k<<=1;
 
-    memset(::a+(n+1),0,(k-n-1)*4);
-    memset(::b+(m+1),0,(k-m-1)*4);
+    // memset(::a+(n+1),0,(k-n-1)*4);
+    // memset(::b+(m+1),0,(k-m-1)*4);
 
-    init(k);
-    NTTfa(::a,k);
-    NTTfa(::b,k);
-    for(S i=0;i<k;i+=8)
-        mul_mod(::a+i,::b+i).store(::c+i);
-    NTTifa(::c,k);
+    // init(k);
+    // NTTfa(::a,k);
+    // NTTfa(::b,k);
+    // for(S i=0;i<k;i+=8)
+    //     mul_mod(::a+i,::b+i).store(::c+i);
+    // NTTifa(::c,k);
     
-    arr_mogo_to(::c,c,k);
+    // arr_mogo_to1(::c,c,k);
 }
 
 /*
