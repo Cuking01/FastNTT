@@ -101,7 +101,7 @@ ymm mod_inv_vec(3524075686u);
 
 U mo(U x){return x>=mod?x-mod:x;}
 
-inline ymm jmod(ymm a){return a-(a>mod1_vec&mod_vec);}
+
 
 LL exgcd(LL a,LL b,LL&x,LL&y)
 {
@@ -116,27 +116,53 @@ LL exgcd(LL a,LL b,LL&x,LL&y)
     return r;
 }
 
-ymm mogo_n;
-ymm mogo_np;
+U mogo_np;
+ymm mogo_n_vec;
+ymm mogo_np_vec;
 
-inline ymm mul_mod(ymm a,ymm b)
+template<int n>
+ALWAYS_INLINE void jmod(ymm_pack<n> a,ymm_pack<n> t,ymm&mod)
 {
-    ymm a1=rmov(a,32);
-    ymm b1=rmov(b,32);
-    ymm t0=a*b;
-    ymm t1=a1*b1;
+    execute_simd<_mm256_cmpgt_epi32>(t,a,mod);
+    execute_simd<_mm256_and_si256>(t,t,mod);
+    execute_simd<_mm256_sub_epi32>(a,a,t);
+    
+    //return a-(a>mod&mod);
+}
 
-    ymm q0=t0*mogo_np;
-    ymm q1=t1*mogo_np;
+//3n+1
+template<int n>
+ALWAYS_INLINE void mul_mod(ymm_pack<n> a,ymm_pack<n> b,ymm_pack<n> t,ymm&constant)
+{
+    constant=_mm256_set1_epi32(mogo_np);
+    execute_simd<_mm256_mul_epu32>(t,a,b);
+    execute_simd<rmov>(a,a,32);
+    execute_simd<rmov>(b,b,32);
+    execute_simd<_mm256_mul_epu32>(a,a,b);
+    execute_simd<rmov>(b,t,32);
+    execute_simd<blend<0xaa>>(b,b,a);
+    execute_simd<_mm256_mul_epu32>(a,a,constant);
+    execute_simd<_mm256_mul_epu32>(t,t,constant);
+    constant=_mm256_set1_epi32(mod);
+    execute_simd<_mm256_mul_epu32>(a,a,constant);
+    execute_simd<_mm256_mul_epu32>(t,t,constant);
+    execute_simd<rmov>(t,t,32);
+    execute_simd<blend<0xaa>>(a,t,a);
+    execute_simd<_mm256_sub_epi32>(a,a,b);
+    jmod(a,t,constant);
 
-    t0=rmov(t0,32);
-
-    ymm m0=q0*mogo_n;
-    ymm m1=q1*mogo_n;
-    m0=rmov(m0,32);
-
-    ymm res=blend<0xaa>(t0,t1)-blend<0xaa>(m0,m1);
-    return jmod(res+mod_vec);
+    // ymm a1=rmov(a,32);
+    // ymm b1=rmov(b,32);
+    // ymm t0=a*b;
+    // ymm t1=a1*b1;
+    // ymm q0=t0*mogo_np;
+    // ymm q1=t1*mogo_np;
+    // t0=rmov(t0,32);
+    // ymm m0=q0*mogo_n;
+    // ymm m1=q1*mogo_n;
+    // m0=rmov(m0,32);
+    // ymm res=blend<0xaa>(t0,t1)-blend<0xaa>(m0,m1);
+    // return jmod(res+mod_vec);
 }
 
 ymm to_mogo(ymm a)
@@ -456,7 +482,7 @@ void arr_to_mogo1(unsigned*from,unsigned*to,int n)
 }
 
 void arr_to_mogo2(unsigned*from,unsigned*to,int n)
-{ 
+{
     static constexpr U yip=((1ull<<62)+mod-1)/mod-(1ull<<32);
     ymm yip_v=ymm(yip);
     ymm zero=_mm256_setzero_si256();
@@ -585,203 +611,191 @@ void init(S ml)
     to_mogo(ymm(wr)).store(wr);
     to_mogo(ymm(wi)).store(wi);
 }
-void NTTfa(U*a,S len)
+void NTTfa(U*from,U*a,S len)
 {
-    for(S i=len>>1;i;i>>=1)
-    {
-        if(i==1)
-        {
-            auto trans1=[](U*p)
-            {
-                ymm x(p);
-                jmod(blend<0xaa>(x+rmov(x,32),lmov(x,32)-x+mod_vec)).store(p);
-            };
-            for(S j=0;j<len;j+=16)
-            {
-                Prefetch(a+j+16);
-                trans1(a+j);
-                trans1(a+j+8);
-            }
-        }
-        else if(i==2)
-        {
-            auto trans2=[](U*xp,U*yp,ymm w)
-            {
-                ymm x(xp),y(yp);
-                ymm t1(blend<0xcc>(x,lmov128<8>(y)));
-                ymm t2(blend<0x33>(y,rmov128<8>(x)));
-                x=jmod(t1+t2);
-                y=mul_mod(t1-t2+mod_vec,w);
-                blend<0xcc>(x,lmov128<8>(y)).store(xp);
-                blend<0x33>(y,rmov128<8>(x)).store(yp);
-            };
-            ymm w=_mm256_set_epi32(wr[3],wr[2],wr[3],wr[2],wr[3],wr[2],wr[3],wr[2]);
-            for(int j=0;j<len;j+=16)
-            {
-                Prefetch(a+j+16);
-                trans2(a+j,a+j+8,w);
-            }
-        }
-        else if(i==4)
-        {
-            auto trans4=[](U*xp,U*yp,ymm w)
-            {
-                ymm tx(xp),ty(yp);
-                ymm x(permute2x128<0x20>(tx,ty));
-                ymm y(permute2x128<0x31>(tx,ty));
-                tx=jmod(x+y);
-                ty=mul_mod(x-y+mod_vec,w);
-                x=permute2x128<0x20>(tx,ty);
-                y=permute2x128<0x31>(tx,ty);
-                x.store(xp);
-                y.store(yp);
-            };
-            ymm w=_mm256_set_epi32(wr[7],wr[6],wr[5],wr[4],wr[7],wr[6],wr[5],wr[4]);
-            for(S j=0;j<len;j+=16)
-            {
-                Prefetch(a+j+16);
-                trans4(a+j,a+j+8,w);
-            }
-        }
-        else
-        {
-            auto trans=[](U*xp,U*yp,const U*wp)
-            {
-                ymm x(xp),y(yp),w(wp);
-                jmod(x+y).store(xp);
-                mul_mod(x-y+mod_vec,w).store(yp);
-            };
-            if(i==8)
-            {
-                for(S j=0;j<len;j+=16)
-                {
-                    Prefetch(a+j+16);
-                    trans(a+j,a+j+8,wr+8);
-                }
-            }
-            else
-            {
+    // for(S i=len>>1;i>=32;i>>=1)
+    // {
+    //     if(i==1)
+    //     {
+    //         auto trans1=[](U*p)
+    //         {
+    //             ymm x(p);
+    //             jmod(blend<0xaa>(x+rmov(x,32),lmov(x,32)-x+mod_vec)).store(p);
+    //         };
+    //         for(S j=0;j<len;j+=16)
+    //         {
+    //             Prefetch(a+j+16);
+    //             trans1(a+j);
+    //             trans1(a+j+8);
+    //         }
+    //     }
+    //     else if(i==2)
+    //     {
+    //         auto trans2=[](U*xp,U*yp,ymm w)
+    //         {
+    //             ymm x(xp),y(yp);
+    //             ymm t1(blend<0xcc>(x,lmov128<8>(y)));
+    //             ymm t2(blend<0x33>(y,rmov128<8>(x)));
+    //             x=jmod(t1+t2);
+    //             y=mul_mod(t1-t2+mod_vec,w);
+    //             blend<0xcc>(x,lmov128<8>(y)).store(xp);
+    //             blend<0x33>(y,rmov128<8>(x)).store(yp);
+    //         };
+    //         ymm w=_mm256_set_epi32(wr[3],wr[2],wr[3],wr[2],wr[3],wr[2],wr[3],wr[2]);
+    //         for(int j=0;j<len;j+=16)
+    //         {
+    //             Prefetch(a+j+16);
+    //             trans2(a+j,a+j+8,w);
+    //         }
+    //     }
+    //     else if(i==4)
+    //     {
+    //         auto trans4=[](U*xp,U*yp,ymm w)
+    //         {
+    //             ymm tx(xp),ty(yp);
+    //             ymm x(permute2x128<0x20>(tx,ty));
+    //             ymm y(permute2x128<0x31>(tx,ty));
+    //             tx=jmod(x+y);
+    //             ty=mul_mod(x-y+mod_vec,w);
+    //             x=permute2x128<0x20>(tx,ty);
+    //             y=permute2x128<0x31>(tx,ty);
+    //             x.store(xp);
+    //             y.store(yp);
+    //         };
+    //         ymm w=_mm256_set_epi32(wr[7],wr[6],wr[5],wr[4],wr[7],wr[6],wr[5],wr[4]);
+    //         for(S j=0;j<len;j+=16)
+    //         {
+    //             Prefetch(a+j+16);
+    //             trans4(a+j,a+j+8,w);
+    //         }
+    //     }
+    //     else
+    //     {
+    //         auto trans=[](U*xp,U*yp,const U*wp)
+    //         {
+    //             ymm x(xp),y(yp),w(wp);
+    //             jmod(x+y).store(xp);
+    //             mul_mod(x-y+mod_vec,w).store(yp);
+    //         };
+    //         if(i==8)
+    //         {
+    //             for(S j=0;j<len;j+=16)
+    //             {
+    //                 Prefetch(a+j+16);
+    //                 trans(a+j,a+j+8,wr+8);
+    //             }
+    //         }
+    //         else
+    //         {
                 
-                for(S j=0;j<len;j+=i<<1)
-                {
-                    for(S k=0;k<i;k+=16)
-                    {
-                        Prefetch(a+j+k+16);
-                        trans(a+j+k,a+j+k+i,wr+i+k);
-                        Prefetch(a+j+k+i+16);
-                        trans(a+j+k+8,a+j+k+i+8,wr+i+k+8);
-                    }
-                }
+    //             for(S j=0;j<len;j+=i<<1)
+    //             {
+    //                 for(S k=0;k<i;k+=16)
+    //                 {
+    //                     Prefetch(a+j+k+16);
+    //                     trans(a+j+k,a+j+k+i,wr+i+k);
+    //                     Prefetch(a+j+k+i+16);
+    //                     trans(a+j+k+8,a+j+k+i+8,wr+i+k+8);
+    //                 }
+    //             }
 
-            }
-        }
-    }
+    //         }
+    //     }
+    // }
 }
 void NTTifa(U*a,S len)
 {
-    for(S i=1;i<len;i<<=1)
-    {
-        if(i==1)
-        {
-            auto trans1=[](U*p)
-            {
-                ymm x(p);
-                jmod(blend<0xaa>(x+rmov(x,32),lmov(x,32)-x+mod_vec)).store(p);
-            };
-            for(S j=0;j<len;j+=16)
-            {
-                _mm_prefetch(a+j+16,_MM_HINT_T0);
-                trans1(a+j);
-                trans1(a+j+8);
-            }
-        }
-        else if(i==2)
-        {
-            auto trans2=[](U*xp,U*yp,ymm w)
-            {
-                ymm x(xp),y(yp);
-                ymm t1(blend<0xcc>(x,lmov128<8>(y)));
-                ymm t2(blend<0x33>(y,rmov128<8>(x)));
-                t2=mul_mod(t2,w);
-                x=jmod(t1+t2);
-                y=jmod(t1-t2+mod_vec);
-                blend<0xcc>(x,lmov128<8>(y)).store(xp);
-                blend<0x33>(y,rmov128<8>(x)).store(yp);
-            };
-            ymm w=_mm256_set_epi32(wi[3],wi[2],wi[3],wi[2],wi[3],wi[2],wi[3],wi[2]);
-            for(int j=0;j<len;j+=16)
-                trans2(a+j,a+j+8,w);
-        }
-        else if(i==4)
-        {
-            auto trans4=[](U*xp,U*yp,ymm w)
-            {
-                ymm tx(xp),ty(yp);
-                ymm x(permute2x128<0x20>(tx,ty));
-                ymm y(permute2x128<0x31>(tx,ty));
-                y=mul_mod(y,w);
-                tx=jmod(x+y);
-                ty=jmod(x-y+mod_vec);
-                x=permute2x128<0x20>(tx,ty);
-                y=permute2x128<0x31>(tx,ty);
-                x.store(xp);
-                y.store(yp);
-            };
-            ymm w=_mm256_set_epi32(wi[7],wi[6],wi[5],wi[4],wi[7],wi[6],wi[5],wi[4]);
-            for(S j=0;j<len;j+=16)
-                trans4(a+j,a+j+8,w);
-        }
-        else
-        {
-            auto trans=[](U*xp,U*yp,const U*wp)
-            {
-                ymm y(yp),w(wp);
-                y=mul_mod(y,w);
-                ymm x(xp);
-                jmod(x+y).store(xp);
-                jmod(x-y+mod_vec).store(yp);
-            };
-            if(i==8)
-            {
-                for(S j=0;j<len;j+=16)
-                {
-                    Prefetch(a+j+16);
-                    trans(a+j,a+j+8,wi+8);
-                }
-            }
-            else
-            {
+    // for(S i=1;i<len;i<<=1)
+    // {
+    //     if(i==1)
+    //     {
+    //         auto trans1=[](U*p)
+    //         {
+    //             ymm x(p);
+    //             jmod(blend<0xaa>(x+rmov(x,32),lmov(x,32)-x+mod_vec)).store(p);
+    //         };
+    //         for(S j=0;j<len;j+=16)
+    //         {
+    //             _mm_prefetch(a+j+16,_MM_HINT_T0);
+    //             trans1(a+j);
+    //             trans1(a+j+8);
+    //         }
+    //     }
+    //     else if(i==2)
+    //     {
+    //         auto trans2=[](U*xp,U*yp,ymm w)
+    //         {
+    //             ymm x(xp),y(yp);
+    //             ymm t1(blend<0xcc>(x,lmov128<8>(y)));
+    //             ymm t2(blend<0x33>(y,rmov128<8>(x)));
+    //             t2=mul_mod(t2,w);
+    //             x=jmod(t1+t2);
+    //             y=jmod(t1-t2+mod_vec);
+    //             blend<0xcc>(x,lmov128<8>(y)).store(xp);
+    //             blend<0x33>(y,rmov128<8>(x)).store(yp);
+    //         };
+    //         ymm w=_mm256_set_epi32(wi[3],wi[2],wi[3],wi[2],wi[3],wi[2],wi[3],wi[2]);
+    //         for(int j=0;j<len;j+=16)
+    //             trans2(a+j,a+j+8,w);
+    //     }
+    //     else if(i==4)
+    //     {
+    //         auto trans4=[](U*xp,U*yp,ymm w)
+    //         {
+    //             ymm tx(xp),ty(yp);
+    //             ymm x(permute2x128<0x20>(tx,ty));
+    //             ymm y(permute2x128<0x31>(tx,ty));
+    //             y=mul_mod(y,w);
+    //             tx=jmod(x+y);
+    //             ty=jmod(x-y+mod_vec);
+    //             x=permute2x128<0x20>(tx,ty);
+    //             y=permute2x128<0x31>(tx,ty);
+    //             x.store(xp);
+    //             y.store(yp);
+    //         };
+    //         ymm w=_mm256_set_epi32(wi[7],wi[6],wi[5],wi[4],wi[7],wi[6],wi[5],wi[4]);
+    //         for(S j=0;j<len;j+=16)
+    //             trans4(a+j,a+j+8,w);
+    //     }
+    //     else
+    //     {
+    //         auto trans=[](U*xp,U*yp,const U*wp)
+    //         {
+    //             ymm y(yp),w(wp);
+    //             y=mul_mod(y,w);
+    //             ymm x(xp);
+    //             jmod(x+y).store(xp);
+    //             jmod(x-y+mod_vec).store(yp);
+    //         };
+    //         if(i==8)
+    //         {
+    //             for(S j=0;j<len;j+=16)
+    //             {
+    //                 Prefetch(a+j+16);
+    //                 trans(a+j,a+j+8,wi+8);
+    //             }
+    //         }
+    //         else
+    //         {
                 
-                for(S j=0;j<len;j+=i<<1)
-                {
-                    for(S k=0;k<i;k+=16)
-                    {
-                        Prefetch(a+j+k+16);
-                        trans(a+j+k,a+j+k+i,wi+i+k);
-                        Prefetch(a+j+k+i+16);
-                        trans(a+j+k+8,a+j+k+i+8,wi+i+k+8);
-                    }
-                }
+    //             for(S j=0;j<len;j+=i<<1)
+    //             {
+    //                 for(S k=0;k<i;k+=16)
+    //                 {
+    //                     Prefetch(a+j+k+16);
+    //                     trans(a+j+k,a+j+k+i,wi+i+k);
+    //                     Prefetch(a+j+k+i+16);
+    //                     trans(a+j+k+8,a+j+k+i+8,wi+i+k+8);
+    //                 }
+    //             }
 
-            }
-        }
-    }
+    //         }
+    //     }
+    // }
     
-    ymm inv((UL)pow(len,mod-2)<<32%mod);
-    for(S i=0;i<len;i+=8)
-        mul_mod(a+i,inv).store(a+i);
-    
-    /*
-    int k=__builtin_ctz(len);
-    ymm k1_vec((U)(len-1));
-    ymm v1_vec(1u);
-    for(S i=0;i<len;i+=8)
-    {
-        ymm x(a+i);
-        ymm t(p0_vec-x&k1_vec);
-        jmod((x+t>>k)+mullo(mod_vec>>k,t)).store(a+i);
-    }
-    */
+    // ymm inv((UL)pow(len,mod-2)<<32%mod);
+    // for(S i=0;i<len;i+=8)
+    //     mul_mod(a+i,inv).store(a+i);
 }
 
 
@@ -807,8 +821,9 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     exgcd(r,mod,ri,np);
     np=(np%r+r)%r;
 
-    mogo_np=ymm(np);
-    mogo_n=ymm(mod);
+    mogo_np=np;
+    mogo_np_vec=ymm(np);
+    mogo_n_vec=ymm(mod);
 
     // test();
     // exit(0);
