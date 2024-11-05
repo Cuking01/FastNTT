@@ -245,7 +245,81 @@ struct Mogo_F
 
 };
 
+struct Ntt
+{
+    static constexpr u2 g=3;
+    static constexpr u2 gi=332748118;
 
+    u3 layer;                               //一次正/逆变换的总层数
+    static constexpr u3 seg_len=32;         //每个小段的大小
+    static constexpr u3 seg_per_group=512;  //每个分组的小段的个数
+    u3 group_num;                           //总共分了多少组
+
+    alignas(64) u2 tmp[seg_len*seg_per_group];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
+
+    /*
+    
+    |---------------------------------数据总长=group_num*seg_per_group*seg_len---------------------------------|
+
+    |-----group_num个seg------||-----group_num个seg------||-----group_num个seg------||-----group_num个seg------|
+
+    {|-seg-|-seg-|-seg-|-seg-|}{|-seg-|-seg-|-seg-|-seg-|}{|-seg-|-seg-|-seg-|-seg-|}{|-seg-|-seg-|-seg-|-seg-|} -----data
+       32    32    32    32       32    32    32    32       32    32    32    32       32    32    32    32    
+       |                          |                          |                          |                          
+       |                          |                          |                          |
+       |                          |                          |                          |
+       ----------------------------------------------------------------------------------------- group_0
+    */
+
+    //先转成蒙哥马利域，然后进行正变换的前min(9,layer-5)层，
+    //分成group_num组，每组内分别计算完成再计算下一组，保证全在L2内
+    void trans_step1(u2*a)
+    {
+
+    }
+
+    //继续正变换，此步进行max(0,layer-14)层变换，每次对相邻的group_num个seg一起做变换，
+    //此时实际上相当于在每个大段上做变换，每个大段变换完成后进行下一个大段的变换，
+    //保证一直在L2内（实际可以保证在L1内，但影响不大）
+    void trans_step2(u2*a)
+    {
+
+    }
+
+    //对每个a和b的对应小段先进行最后5层正变换，然后乘起来，再进行5次逆变换后存入c中
+    //除了一开始读a,b,w和wi，以及最后写c，中间全部在寄存器中进行。
+    void trans_step3(u2*a,u2*b,u2*c)
+    {
+        Pack<VU32x8,4> va,vb,t;
+        VU32x8 vmod=set1(Mogo_F::mod),vmodp=set1(Mogo_F::modp);
+        VU32x8 w0,w1;
+
+        
+    }
+
+    //与step2类似，但是进行的是逆变换
+    void trans_step4(u2*a)
+    {
+
+    }
+
+    //与step1类似，但是进行的是逆变换
+    void trans_step5(u2*a)
+    {
+
+    }
+
+    void mul(u2*a,u2*b,u2*c,u3 len)
+    {
+        u3 k=5;
+        while((1ull<<k)<len)k<<=1;
+        len=1ull<<k;
+
+        u3 layer=k;
+
+
+    }
+};
 
 
 void test()
@@ -262,9 +336,20 @@ void test()
     }
 }
 
+
+
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 {
-    
+    Pack<VU32x8,4> x,y,t;
+    VU32x8 vmod=set1(mod),vmodp=set1(Mogo_F::modp);
+    for(int j=0;j<1024*1024;j++)
+    for(int i=0;i<1024;i+=32)
+    {
+        x.loadu(a+i);
+        y.loadu(b+i);
+        Mogo_F::mul_3<4>(x,y,t,vmod,vmodp);
+        x.storeu(a+i);
+    }
 }
 
 /*
