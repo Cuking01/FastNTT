@@ -290,11 +290,18 @@ struct Ntt
     //除了一开始读a,b,w和wi，以及最后写c，中间全部在寄存器中进行。
     void trans_step3(u2*a,u2*b,u2*c)
     {
-        Pack<VU32x8,4> va,vb,t;
-        VU32x8 vmod=set1(Mogo_F::mod),vmodp=set1(Mogo_F::modp);
-        VU32x8 w0,w1;
+        Pack<VU32x8,16> regs;
 
-        
+        Pack_Ref<VU32x8,4> va=regs[0,1,2,3];
+        Pack_Ref<VU32x8,4> vb=regs[4,5,6,7];
+        Pack_Ref<VU32x8,4> t =regs[8,9,10,11];
+        VU32x8&vmod=regs[12];
+        VU32x8&vmodp=regs[13];
+        Pack_Ref<VU32x8,2> w=regs[14,15];
+
+        //auto all=Pack_Ref<VU32x8,16>(va,vb,t,w);
+        //static_assert()
+        //static_assert(Reg_Lvalue_Like_T<Pack_Ref<VU32x8,4>&>);
     }
 
     //与step2类似，但是进行的是逆变换

@@ -28,7 +28,6 @@ void test(int n)
 		poly_multiply(a,n-1,b,n-1,c);
 
 	int ed=clock();
-
 	u3 fa=0;
 	u3 fb=0;
 	u3 fc=0;
