@@ -20,7 +20,7 @@ void test(int n)
 		b[i]=rnd()%10;
 	}
 
-	int k=(1<<24)/n;
+	int k=1;//(1<<24)/n;
 
 	int st=clock();
 

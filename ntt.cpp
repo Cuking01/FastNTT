@@ -18,7 +18,7 @@ static constexpr u2 pow_no_mod(u2 a,u2 b)
 
 struct ZF
 {
-    constexpr u2 pow(u2 a,u2 b)
+    static constexpr u2 pow(u2 a,u2 b)
     {
         u2 ans=1;
         while(b)
@@ -243,7 +243,19 @@ struct Mogo_F
         }
     }
 
+
+    static ALWAYS_INLINE void get_modp(VU32x8&vmodp)
+    {
+        vmodp=set1(modp);
+    }
+
+    static ALWAYS_INLINE void get_mod(VU32x8&vmod)
+    {
+        vmod=set1(mod);
+    }
 };
+
+using MF=Mogo_F;
 
 struct Ntt
 {
@@ -256,6 +268,53 @@ struct Ntt
     u3 group_num;                           //总共分了多少组
 
     alignas(64) u2 tmp[seg_len*seg_per_group];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
+    
+    alignas(32) u2 w2[8];
+    alignas(32) u2 wi2[8];
+    alignas(32) u2 w4[8];
+    alignas(32) u2 wi4[8];
+    alignas(32) u2 w8[8];
+    alignas(32) u2 wi8[8];
+    alignas(64) u2 w16[8];
+    alignas(64) u2 wi16[8];
+    alignas(64) u2 w32[16];
+    alignas(64) u2 wi32[16];
+    alignas(64) u2 w[1<<21];
+    alignas(64) u2 wi[1<<21];
+
+    Ntt()
+    {
+        u2 W,Wi;
+        for(u3 i=0;i<8;i++)
+            w2[i]=1,wi2[i]=1;
+        W=ZF::pow(g,(mod-1)/4);
+        Wi=ZF::pow(gi,(mod-1)/4);
+        for(u3 i=0;i<8;i+=2)
+        {
+            w4[i]=1,wi4[i]=1;
+            for(u3 j=1;j<2;j++)
+                w4[j]=(u3)w4[j-1]*W%mod,wi4[i]=(u3)wi4[j-1]*Wi%mod;
+        }
+
+        W=ZF::pow(g,(mod-1)/8);
+        Wi=ZF::pow(gi,(mod-1)/8);
+        for(u3 i=0;i<8;i+=4)
+        {
+            w4[i]=1,wi4[i]=1;
+            for(u3 j=1;j<2;j++)
+                w4[j]=(u3)w4[j-1]*W%mod,wi4[i]=(u3)wi4[j-1]*Wi%mod;
+        }
+
+        W=ZF::pow(g,(mod-1)/32);
+        Wi=ZF::pow(g,(mod-1)/32);
+        w32[0]=1;
+        wi32[0]=1;
+        for(u3 i=1;i<16;i++)
+        {
+            w32[i]=(u3)w32[i-1]*W%mod;
+            wi32[i]=(u3)wi32[i-1]*Wi%mod;
+        }
+    }
 
     /*
     
@@ -297,11 +356,57 @@ struct Ntt
         Pack_Ref<VU32x8,4> t =regs[8,9,10,11];
         VU32x8&vmod=regs[12];
         VU32x8&vmodp=regs[13];
-        Pack_Ref<VU32x8,2> w=regs[14,15];
+        VU32x8&vmod2=regs[14];
 
-        //auto all=Pack_Ref<VU32x8,16>(va,vb,t,w);
-        //static_assert()
-        //static_assert(Reg_Lvalue_Like_T<Pack_Ref<VU32x8,4>&>);
+        //假设len>=64，即layer>=6
+        u3 len=1ull<<layer;
+
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+        vmod2=vmod<<cint<1>;
+
+        for(u3 i=0;i<len;i+=64)
+        {
+            va.load(a+i);
+            vb.load(b+i);
+            //32正变换
+            {
+                Pack_Ref px(va[0,1],vb[0,1]);
+                Pack_Ref py(va[2,3],vb[2,3]);
+                
+                t=px+py;
+                px=px-py;
+                py[0,1].load(w32);
+                px=px+vmod2;
+                MF::jmod(t,py,vmod2);
+                t[0,1].store(a+i);
+                t[2,3].store(b+i);
+                py[2,3]=py[0,1];
+                
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+
+                px.load(a+i,a+i+8,b+i,b+i+8);
+            }
+            //16正变换
+            {
+                Pack_Ref px(va[0,2],vb[0,2]);
+                Pack_Ref py(va[1,3],vb[1,3]);
+
+                t=px+py;
+                px=px-py;
+                py[0].load(w16);
+                px=px+vmod2;
+                MF::jmod(t,py,vmod2);
+                t.store(a+i,a+i+16,b+i,b+i+16);
+                py[1,2,3]=py[0,0,0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(a+i,a+i+16,b+i,b+i+16);
+
+            }
+            //转置
+            //8 4 2正变换
+            //
+        }
     }
 
     //与step2类似，但是进行的是逆变换
@@ -354,7 +459,7 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     {
         x.loadu(a+i);
         y.loadu(b+i);
-        Mogo_F::mul_3<4>(x,y,t,vmod,vmodp);
+        Mogo_F::mul_3<4,false>(x,y,t,vmod,vmodp);
         x.storeu(a+i);
     }
 }
