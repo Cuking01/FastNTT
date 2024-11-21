@@ -257,6 +257,17 @@ struct Mogo_F
 
 using MF=Mogo_F;
 
+ALWAYS_INLINE void Transpose(Pack_Ref<VU32x8,8> mat,Pack_Ref<VU32x8,8> tmp)
+{
+    tmp[0,1,2,3]=permute2x(mat[0,1,2,3],mat[4,5,6,7],cint<0b0010'0000>);
+    tmp[4,5,6,7]=permute2x(mat[0,1,2,3],mat[4,5,6,7],cint<0b0011'0001>);
+    mat[0,1,4,5].as<VI64x4>()=unpacklo(tmp[0,1,4,5].as<VI64x4>(),tmp[2,3,6,7].as<VI64x4>());
+    mat[2,3,6,7].as<VI64x4>()=unpackhi(tmp[0,1,4,5].as<VI64x4>(),tmp[2,3,6,7].as<VI64x4>());
+    tmp=shuffle(mat,cint<0b1101'1000>);
+    mat[0,2,4,6]=unpacklo(tmp[0,2,4,6],tmp[1,3,5,7]);
+    mat[1,3,5,7]=unpackhi(tmp[0,2,4,6],tmp[1,3,5,7]);
+}
+
 struct Ntt
 {
     static constexpr u2 g=3;
@@ -351,9 +362,9 @@ struct Ntt
     {
         Pack<VU32x8,16> regs;
 
-        Pack_Ref<VU32x8,4> va=regs[0,1,2,3];
-        Pack_Ref<VU32x8,4> vb=regs[4,5,6,7];
-        Pack_Ref<VU32x8,4> t =regs[8,9,10,11];
+        Pack_Ref va=regs[0,1,2,3];
+        Pack_Ref vb=regs[4,5,6,7];
+        Pack_Ref t =regs[8,9,10,11];
         VU32x8&vmod=regs[12];
         VU32x8&vmodp=regs[13];
         VU32x8&vmod2=regs[14];
@@ -365,11 +376,12 @@ struct Ntt
         MF::get_modp(vmodp);
         vmod2=vmod<<cint<1>;
 
+        alignas(64) u2 tmp[32];
+
         for(u3 i=0;i<len;i+=64)
         {
-            va.load(a+i);
-            vb.load(b+i);
             //32正变换
+            auto trans32=[&] ALWAYS_INLINE_LAMBDA ()
             {
                 Pack_Ref px(va[0,1],vb[0,1]);
                 Pack_Ref py(va[2,3],vb[2,3]);
@@ -379,15 +391,14 @@ struct Ntt
                 py[0,1].load(w32);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
-                t[0,1].store(a+i);
-                t[2,3].store(b+i);
+                t.store(tmp);
                 py[2,3]=py[0,1];
-                
                 MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+            };
 
-                px.load(a+i,a+i+8,b+i,b+i+8);
-            }
             //16正变换
+            auto trans16=[&] ALWAYS_INLINE_LAMBDA ()
             {
                 Pack_Ref px(va[0,2],vb[0,2]);
                 Pack_Ref py(va[1,3],vb[1,3]);
@@ -397,15 +408,188 @@ struct Ntt
                 py[0].load(w16);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
-                t.store(a+i,a+i+16,b+i,b+i+16);
+                t.store(tmp);
                 py[1,2,3]=py[0,0,0];
                 MF::mul_3<4,false>(py,px,t,vmod,vmodp);
-                px.load(a+i,a+i+16,b+i,b+i+16);
+                px.load(tmp);
+            };
 
-            }
-            //转置
-            //8 4 2正变换
-            //
+            //8正变换
+            auto trans8=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,1,2,3]);
+                Pack_Ref py(regs[4,5,6,7]);
+                t=px+py;
+                px=px-py;
+                py[0].load(w8);
+                px=px+vmod2;
+                MF::jmod(t,py,vmod2);
+                t.store(tmp);
+                py[1,2,3]=py[0,0,0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+            };
+
+            //4正变换
+            auto trans4=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,1,4,5]);
+                Pack_Ref py(regs[2,3,6,7]);
+                t=px+py;
+                px=px-py;
+                py[0].load(w4);
+                px=px+vmod2;
+                MF::jmod(t,py,vmod2);
+                t.store(tmp);
+                py[1,2,3]=py[0,0,0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+            };
+
+            //2正变换
+            auto trans2=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,2,4,6]);
+                Pack_Ref py(regs[1,3,5,7]);
+                t=px-py;
+                px=px+py;
+                t=px+vmod2;
+                MF::jmod(t,py,vmod2);
+                MF::jmod(px,py,vmod2);
+                py=t;
+            };
+
+            //2逆变换，和正变换一样
+            auto trans2i=trans2;
+
+            //4逆变换
+            auto trans4i=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,1,4,5]);
+                Pack_Ref py(regs[2,3,6,7]);
+                
+                px.store(tmp);
+                t[0].load(wi4);
+                t[1,2,3]=t[0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+
+                t=px-py;
+                px=px+py;
+                py=t+vmod2;
+
+                MF::jmod(px,t,vmod2);
+                MF::jmod(py,t,vmod2);
+            };
+
+            //8逆变换
+            auto trans8i=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,1,2,3]);
+                Pack_Ref py(regs[4,5,6,7]);
+                
+                px.store(tmp);
+                t[0].load(wi8);
+                t[1,2,3]=t[0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+
+                t=px-py;
+                px=px+py;
+                py=t+vmod2;
+
+                MF::jmod(px,t,vmod2);
+                MF::jmod(py,t,vmod2);
+            };
+
+            //16逆变换
+            auto trans16i=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,2,4,6]);
+                Pack_Ref py(regs[1,3,5,7]);
+                
+                px.store(tmp);
+                t[0].load(wi16);
+                t[1,2,3]=t[0];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+
+                t=px-py;
+                px=px+py;
+                py=t+vmod2;
+
+                MF::jmod(px,t,vmod2);
+                MF::jmod(py,t,vmod2);
+            };
+
+            //32逆变换
+            auto trans32i=[&] ALWAYS_INLINE_LAMBDA ()
+            {
+                Pack_Ref px(regs[0,1,4,5]);
+                Pack_Ref py(regs[2,3,6,7]);
+                
+                px.store(tmp);
+                t[0,1].load(wi32);
+                t[2,3]=t[0,1];
+                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                px.load(tmp);
+
+                t=px-py;
+                px=px+py;
+                py=t+vmod2;
+
+                MF::jmod(px,t,vmod2);
+                MF::jmod(py,t,vmod2);
+            };
+
+            va.load(a+i);
+            vb.load(b+i);
+            trans32();
+            trans16();
+            Transpose(Pack_Ref(va,vb),regs[8,9,10,11,12,13,14,15]);
+            MF::get_mod(vmod);
+            MF::get_modp(vmodp);
+            vmod2=vmod<<cint<1>;
+            trans8();
+            trans4();
+            trans2();
+            va.store(a+i);
+            vb.store(b+i);
+            va.load(a+i+32);
+            vb.load(b+i+32);
+            trans32();
+            trans16();
+            Transpose(Pack_Ref(va,vb),regs[8,9,10,11,12,13,14,15]);
+            MF::get_mod(vmod);
+            MF::get_modp(vmodp);
+            vmod2=vmod<<cint<1>;
+            trans8();
+            trans4();
+            trans2();
+            va.store(b+i+32);
+            va.load(a+i);
+            t=permute2x(va,vb,cint<0x31>);
+            va=permute2x(va,vb,cint<0x20>);
+            MF::mul_3<4,false>(t,va,vb,vmod,vmodp);
+            va.load(b+i);
+            vb.load(b+i+32);
+            t.store(c+i);
+            t=permute2x(va,vb,cint<0x31>);
+            va=permute2x(va,vb,cint<0x20>);
+            MF::mul_3<4,false>(t,va,vb,vmod,vmodp);
+            va.load(c+i);
+            vb=t;
+            trans2i();
+            trans4i();
+            trans8i();
+            Transpose(Pack_Ref(va,vb),regs[8,9,10,11,12,13,14,15]);
+            MF::get_mod(vmod);
+            MF::get_modp(vmodp);
+            vmod2=vmod<<cint<1>;
+            trans16i();
+            trans32i();
+            va.store(c+i);
+            vb.store(c+i+32);
         }
     }
 
@@ -432,6 +616,7 @@ struct Ntt
 
     }
 };
+
 
 
 void test()
