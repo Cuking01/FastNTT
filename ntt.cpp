@@ -2,7 +2,7 @@
 #include "../CuSDK/simd.h"
 
 
-static constexpr u2 mod=998244353;
+static constexpr u2 mod=469762049;
 
 static constexpr u2 pow_no_mod(u2 a,u2 b)
 {
@@ -36,7 +36,7 @@ struct ZF
 struct Mogo_F
 {
     static constexpr u2 mod=::mod;
-    static constexpr u2 yi=((1ull<<62)+mod-1)/mod-(1ull<<32);
+    static constexpr u2 yi=((1ull<<61)+mod-1)/mod-(1ull<<32);
     static constexpr u2 modp=pow_no_mod(mod,(1u<<31)-1);
 
     static constexpr u2 jmod(u2 x)
@@ -85,7 +85,7 @@ struct Mogo_F
     }
 
     template<u2 n,bool j_mod=true>
-    ALWAYS_INLINE static void mul_3(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> b,Pack_Ref<VU32x8,n> t,VU32x8& vmod,VU32x8& vmodp)
+    ALWAYS_INLINE static void mul_3(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> b,Pack_Ref<VU32x8,n> t,const VU32x8& vmod,const VU32x8& vmodp)
     {
         using w64=VU64x4;
         auto ap=a.template as<w64>();
@@ -160,7 +160,7 @@ struct Mogo_F
         auto tp0=t0.template as<w64>();
         auto tp1=t1.template as<w64>();
 
-        x=x<<cint<2>;
+        x=x<<cint<3>;
         tp1=xp>>cint<32>;
         tp0=x*vyi;
         tp1=t1*vyi;
@@ -172,8 +172,8 @@ struct Mogo_F
         tp1=t1*vmod;
         tp1=tp1<<cint<32>;
         x=blend(t0,t1,cint<0xaa>);
-        t0[0]=t0[0]^t0[0];
-        x=t0[0]-x;
+        x=vmod-x;
+        jmod<n>(x,t0,vmod);
     }
 
     template<u2 n>
@@ -268,17 +268,24 @@ ALWAYS_INLINE void Transpose(Pack_Ref<VU32x8,8> mat,Pack_Ref<VU32x8,8> tmp)
     mat[1,3,5,7]=unpackhi(tmp[0,2,4,6],tmp[1,3,5,7]);
 }
 
+void debug_print_arr(u2*a,u3 len)
+{
+    for(u3 i=0;i<len;i++)
+    {
+        printf("%10u ",a[i]);
+        if(i%8==7)puts("");
+    }
+}
+
 struct Ntt
 {
     static constexpr u2 g=3;
-    static constexpr u2 gi=332748118;
+    static constexpr u2 gi=ZF::pow(3,mod-2);
 
     u3 layer;                               //一次正/逆变换的总层数
     static constexpr u3 seg_len=32;         //每个小段的大小
     static constexpr u3 seg_per_group=512;  //每个分组的小段的个数
     u3 group_num;                           //总共分了多少组
-
-    alignas(64) u2 tmp[seg_len*seg_per_group];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
     
     alignas(32) u2 w2[8];
     alignas(32) u2 wi2[8];
@@ -290,8 +297,54 @@ struct Ntt
     alignas(64) u2 wi16[8];
     alignas(64) u2 w32[16];
     alignas(64) u2 wi32[16];
-    alignas(64) u2 w[1<<21];
-    alignas(64) u2 wi[1<<21];
+
+    static constexpr u3 w_max_len=1ull<<20;
+
+    alignas(64) static inline u2 w[w_max_len];
+    alignas(64) static inline u2 wi[w_max_len];
+
+    void re_w_len(u3 len=w_max_len)
+    {
+        for(u3 i=32;i<len;i<<=1)
+        {
+            Pack<VU32x8,4> vw,y,t;
+            VU32x8 vw32,vmod,vmodp;
+
+            MF::get_mod(vmod);
+            MF::get_modp(vmodp);
+            alignas(64) u2 wt[32];
+            u2 w1=ZF::pow(g,(mod-1)/(i<<1));
+            wt[0]=1;
+            for(u3 j=1;j<32;j++)
+                wt[j]=(u3)wt[j-1]*w1%mod;
+            MF::arr_to_mf(wt,wt,32);
+            vw.load(wt);
+            vw32=set1(MF::to_mf(ZF::pow(w1,32)));
+
+
+            for(u3 j=0;j<i;j+=32)
+            {
+                vw.store(w+i+j);
+                y=vw32;
+                MF::mul_3<4>(vw,vw32,t,vmod,vmodp);
+            }
+            
+
+            w1=ZF::pow(gi,(mod-1)/(i<<1));
+            wt[0]=1;
+            for(u3 j=1;j<32;j++)
+                wt[j]=(u3)wt[j-1]*w1%mod;
+            MF::arr_to_mf(wt,wt,32);
+            vw.load(wt);
+            vw32=set1(MF::to_mf(ZF::pow(w1,32)));
+            for(u3 j=0;j<i;j+=32)
+            {
+                vw.store(wi+i+j);
+                y=vw32;
+                MF::mul_3<4>(vw,vw32,t,vmod,vmodp);
+            }
+        }
+    }
 
     Ntt()
     {
@@ -304,20 +357,29 @@ struct Ntt
         {
             w4[i]=1,wi4[i]=1;
             for(u3 j=1;j<2;j++)
-                w4[j]=(u3)w4[j-1]*W%mod,wi4[i]=(u3)wi4[j-1]*Wi%mod;
+                w4[i+j]=(u3)w4[i+j-1]*W%mod,wi4[i+j]=(u3)wi4[i+j-1]*Wi%mod;
         }
 
         W=ZF::pow(g,(mod-1)/8);
         Wi=ZF::pow(gi,(mod-1)/8);
         for(u3 i=0;i<8;i+=4)
         {
-            w4[i]=1,wi4[i]=1;
-            for(u3 j=1;j<2;j++)
-                w4[j]=(u3)w4[j-1]*W%mod,wi4[i]=(u3)wi4[j-1]*Wi%mod;
+            w8[i]=1,wi8[i]=1;
+            for(u3 j=1;j<4;j++)
+                w8[i+j]=(u3)w8[i+j-1]*W%mod,wi8[i+j]=(u3)wi8[i+j-1]*Wi%mod;
+        }
+
+        W=ZF::pow(g,(mod-1)/16);
+        Wi=ZF::pow(gi,(mod-1)/16);
+        for(u3 i=0;i<8;i+=8)
+        {
+            w16[i]=1,wi16[i]=1;
+            for(u3 j=1;j<8;j++)
+                w16[i+j]=(u3)w16[i+j-1]*W%mod,wi16[i+j]=(u3)wi16[i+j-1]*Wi%mod;
         }
 
         W=ZF::pow(g,(mod-1)/32);
-        Wi=ZF::pow(g,(mod-1)/32);
+        Wi=ZF::pow(gi,(mod-1)/32);
         w32[0]=1;
         wi32[0]=1;
         for(u3 i=1;i<16;i++)
@@ -325,6 +387,20 @@ struct Ntt
             w32[i]=(u3)w32[i-1]*W%mod;
             wi32[i]=(u3)wi32[i-1]*Wi%mod;
         }
+
+        MF::arr_to_mf(w2,w2,8);
+        MF::arr_to_mf(wi2,wi2,8);
+        MF::arr_to_mf(w4,w4,8);
+        MF::arr_to_mf(wi4,wi4,8);
+        MF::arr_to_mf(w8,w8,8);
+        MF::arr_to_mf(wi8,wi8,8);
+        MF::arr_to_mf(w16,w16,8);
+        MF::arr_to_mf(wi16,wi16,8);
+        MF::arr_to_mf(w32,w32,16);
+        MF::arr_to_mf(wi32,wi32,16);
+
+        re_w_len();
+
     }
 
     /*
@@ -345,7 +421,63 @@ struct Ntt
     //分成group_num组，每组内分别计算完成再计算下一组，保证全在L2内
     void trans_step1(u2*a)
     {
+        alignas(64) u2 tmp[seg_len*seg_per_group];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
+        alignas(64) u2 tmp_w[seg_len*seg_per_group];
+        u3 L=14<layer?9:layer-5;
 
+        u3 log2_group_num=0;
+        while((1ull<<log2_group_num)<group_num)
+            log2_group_num++;
+
+        for(u3 group_id=0;group_id<group_num;group_id++)
+        {
+            Pack<VU32x8,4> vt;
+            for(u3 j=0;j<seg_per_group;j++)
+            {
+                vt.load(a+(j*group_num+group_id)*seg_len);
+                vt.store(tmp+j*seg_len);
+            }
+            for(u3 j=1;j<seg_per_group;j<<=1)
+            {
+                for(u3 k=0;k<j;k++)
+                {
+                    vt.load(w+((j+k)*group_num+group_id)*seg_len);
+                    vt.store(tmp_w+(j+k)*seg_len);
+                }
+            }
+
+            Pack<VU32x8,4>vx,vy;
+            VU32x8 vmod,vmodp,vmod2;
+            MF::get_mod(vmod);
+            MF::get_modp(vmodp);
+            vmod2=vmod<<cint<1>;
+
+            for(u3 l=0;l<L;l++)
+            {
+                u3 i=1ull<<(layer-l-1);
+                u3 ip=i/group_num;
+
+                for(u3 j=0;j<seg_len*seg_per_group;j+=ip<<1)
+                {
+                    for(u3 k=0;k<ip;k+=32)
+                    {
+                        vx.load(tmp+j+k);
+                        vy.load(tmp+j+k+ip);
+
+                        vt=vx+vy;
+                        vy=vx-vy;
+                        MF::jmod<4>(vt,vx,vmod2);
+                        vt.store(tmp+j+k);
+
+                        vt.load(tmp_w+ip+k);
+                        
+                        vy=vy+vmod2;
+                        MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
+                        vy.store(tmp+j+k+ip);
+                    }
+                }
+            }
+        }
     }
 
     //继续正变换，此步进行max(0,layer-14)层变换，每次对相邻的group_num个seg一起做变换，
@@ -357,7 +489,7 @@ struct Ntt
     }
 
     //对每个a和b的对应小段先进行最后5层正变换，然后乘起来，再进行5次逆变换后存入c中
-    //除了一开始读a,b,w和wi，以及最后写c，中间全部在寄存器中进行。
+    //除了一开始读a,b,w和wi，以及最后写c，中间全部在寄存器中进行(但实际上还是出现少量溢出，多了一些内存操作)。
     void trans_step3(u2*a,u2*b,u2*c)
     {
         Pack<VU32x8,16> regs;
@@ -377,6 +509,8 @@ struct Ntt
         vmod2=vmod<<cint<1>;
 
         alignas(64) u2 tmp[32];
+        const u2 w41=w4[1];
+        const u2 wi41=wi4[1];
 
         for(u3 i=0;i<len;i+=64)
         {
@@ -385,13 +519,13 @@ struct Ntt
             {
                 Pack_Ref px(va[0,1],vb[0,1]);
                 Pack_Ref py(va[2,3],vb[2,3]);
-                
                 t=px+py;
                 px=px-py;
-                py[0,1].load(w32);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
+                //MF::jmod(px,py,vmod2);
                 t.store(tmp);
+                py[0,1].load(w32);
                 py[2,3]=py[0,1];
                 MF::mul_3<4,false>(py,px,t,vmod,vmodp);
                 px.load(tmp);
@@ -402,14 +536,14 @@ struct Ntt
             {
                 Pack_Ref px(va[0,2],vb[0,2]);
                 Pack_Ref py(va[1,3],vb[1,3]);
-
                 t=px+py;
                 px=px-py;
-                py[0].load(w16);
+                regs[15].load(w16);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
+                //MF::jmod(px,py,vmod2);
                 t.store(tmp);
-                py[1,2,3]=py[0,0,0];
+                py=regs[15];
                 MF::mul_3<4,false>(py,px,t,vmod,vmodp);
                 px.load(tmp);
             };
@@ -421,28 +555,31 @@ struct Ntt
                 Pack_Ref py(regs[4,5,6,7]);
                 t=px+py;
                 px=px-py;
-                py[0].load(w8);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
+                //MF::jmod(px,py,vmod2);
+                MF::jmod<1>(px[0],py[0],vmod2);
                 t.store(tmp);
-                py[1,2,3]=py[0,0,0];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                py[1,2,3]=set1(Scale_Pack(w8[1],w8[2],w8[3]));
+                MF::mul_4<3,false>(py[1,2,3],px[1,2,3],t[1,2,3],Pack_Ref(py[0],t[0],regs[15]),vmod,vmodp);
+                py[0]=px[0];
                 px.load(tmp);
             };
 
-            //4正变换
             auto trans4=[&] ALWAYS_INLINE_LAMBDA ()
             {
                 Pack_Ref px(regs[0,1,4,5]);
                 Pack_Ref py(regs[2,3,6,7]);
                 t=px+py;
                 px=px-py;
-                py[0].load(w4);
                 px=px+vmod2;
                 MF::jmod(t,py,vmod2);
+                MF::jmod(px[0,2],py[0,2],vmod2);
                 t.store(tmp);
-                py[1,2,3]=py[0,0,0];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                py[1]=set1(w41);
+                py[3]=py[1];
+                MF::mul_4<2,false>(py[1,3],px[1,3],t[0,1],t[2,3],vmod,vmodp);
+                py[0,2]=px[0,2];
                 px.load(tmp);
             };
 
@@ -453,7 +590,7 @@ struct Ntt
                 Pack_Ref py(regs[1,3,5,7]);
                 t=px-py;
                 px=px+py;
-                t=px+vmod2;
+                t=t+vmod2;
                 MF::jmod(t,py,vmod2);
                 MF::jmod(px,py,vmod2);
                 py=t;
@@ -469,9 +606,9 @@ struct Ntt
                 Pack_Ref py(regs[2,3,6,7]);
                 
                 px.store(tmp);
-                t[0].load(wi4);
-                t[1,2,3]=t[0];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                t[1]=set1(wi41);
+                t[3]=t[1];
+                MF::mul_4<2,false>(py[1,3],t[1,3],px[0,1],px[2,3],vmod,vmodp);
                 px.load(tmp);
 
                 t=px-py;
@@ -489,9 +626,8 @@ struct Ntt
                 Pack_Ref py(regs[4,5,6,7]);
                 
                 px.store(tmp);
-                t[0].load(wi8);
-                t[1,2,3]=t[0];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                t[1,2,3]=set1(Scale_Pack(wi8[1],wi8[2],wi8[3]));
+                MF::mul_4<3,false>(py[1,2,3],t[1,2,3],px[1,2,3],Pack_Ref(t[0],px[0],regs[15]),vmod,vmodp);
                 px.load(tmp);
 
                 t=px-py;
@@ -511,7 +647,7 @@ struct Ntt
                 px.store(tmp);
                 t[0].load(wi16);
                 t[1,2,3]=t[0];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                MF::mul_3<4,false>(py,t,px,vmod,vmodp);
                 px.load(tmp);
 
                 t=px-py;
@@ -531,7 +667,7 @@ struct Ntt
                 px.store(tmp);
                 t[0,1].load(wi32);
                 t[2,3]=t[0,1];
-                MF::mul_3<4,false>(py,px,t,vmod,vmodp);
+                MF::mul_3<4,false>(py,t,px,vmod,vmodp);
                 px.load(tmp);
 
                 t=px-py;
@@ -566,16 +702,16 @@ struct Ntt
             trans8();
             trans4();
             trans2();
-            va.store(b+i+32);
-            va.load(a+i);
-            t=permute2x(va,vb,cint<0x31>);
-            va=permute2x(va,vb,cint<0x20>);
+            vb.store(b+i+32);
+            vb.load(a+i);
+            t=permute2x(va,vb,cint<0x13>);
+            va=permute2x(va,vb,cint<0x02>);
             MF::mul_3<4,false>(t,va,vb,vmod,vmodp);
-            va.load(b+i);
-            vb.load(b+i+32);
+            vb.load(b+i);
+            va.load(b+i+32);
             t.store(c+i);
-            t=permute2x(va,vb,cint<0x31>);
-            va=permute2x(va,vb,cint<0x20>);
+            t=permute2x(va,vb,cint<0x13>);
+            va=permute2x(va,vb,cint<0x02>);
             MF::mul_3<4,false>(t,va,vb,vmod,vmodp);
             va.load(c+i);
             vb=t;
@@ -608,45 +744,165 @@ struct Ntt
     void mul(u2*a,u2*b,u2*c,u3 len)
     {
         u3 k=5;
-        while((1ull<<k)<len)k<<=1;
+        while((1ull<<k)<len)k++;
         len=1ull<<k;
 
-        u3 layer=k;
+        layer=k;
+        group_num=len/(seg_per_group*seg_len);
+        MF::arr_to_mf(a,a,len);
+        MF::arr_to_mf(b,b,len);
+        int st=clock();
+        for(int i=0;i<100000;i++)
+            trans_step3(a,b,c);
+        int ed=clock();
+        printf("\n\ntime=%d\n",ed-st);
+        u2 inv=ZF::pow(len,mod-2);
+        inv=MF::to_mf(inv);
 
-
+        for(u3 i=0;i<len;i++)
+            c[i]=MF::mul(c[i],inv);
+        MF::arr_to_zf(c,c,len);
     }
 };
 
 
 
+
+namespace NTT_simple
+{
+    static constexpr u2 g=3u;
+    static constexpr u2 gi=ZF::pow(3,mod-2);
+
+    void NTT(u2*a,u3 len)
+    {
+        for(u3 i=len>>1;i;i>>=1)
+        {
+            u2 wi=ZF::pow(g,(mod-1)/(i<<1));
+            for(u3 j=0;j<len;j+=i<<1)
+            {
+                u2 w=1;
+                for(u3 k=0;k<i;k++,w=(u3)w*wi%mod)
+                {
+                    u2 x=a[j+k],y=a[i+j+k];
+                    a[j+k]=(x+y)%mod;
+                    a[i+j+k]=(u3)(x-y+mod)*w%mod;
+                }
+            }
+            
+        }
+    }
+
+    void NTTi(u2*a,u3 len)
+    {
+        for(u3 i=1;i<len;i<<=1)
+        {
+            u2 wi=ZF::pow(gi,(mod-1)/(i<<1));
+            for(u3 j=0;j<len;j+=i<<1)
+            {
+                u2 w=1;
+                for(u3 k=0;k<i;k++,w=(u3)w*wi%mod)
+                {
+                    u2 x=a[j+k],y=(u3)a[i+j+k]*w%mod;
+                    a[j+k]=(x+y)%mod;
+                    a[i+j+k]=(x-y+mod)%mod;
+                }
+            }
+        }
+
+        u2 inv=ZF::pow(len,mod-2);
+        for(int i=0;i<len;i++)
+            a[i]=(u3)a[i]*inv%mod;
+    }
+
+    u2 ta[10000];
+    u2 tb[10000];
+
+    void mul(u2*a,u2*b,u3 lena,u3 lenb,u2*c)
+    {
+        u3 len=lena+lenb-1;
+        u3 k=32;
+        memset(ta,0,sizeof(u2)*k);
+        memset(tb,0,sizeof(u2)*k);
+        memcpy(ta,a,sizeof(u2)*lena);
+        memcpy(tb,b,sizeof(u2)*lenb);
+
+        NTT(ta,k);
+        NTT(tb,k);
+
+        for(u3 i=0;i<k;i++)
+            ta[i]=(u3)ta[i]*tb[i]%mod;
+
+        NTTi(ta,k);
+
+        memcpy(c,ta,sizeof(u2)*len);
+    }
+};
+
 void test()
 {
-    u2 a[1005];
-    for(int i=0;i<1005;i++)
-        a[i]=i;
-    Mogo_F::arr_to_mf(a,a,1005);
-    Mogo_F::arr_to_zf(a,a,1005);
-    for(int i=0;i<1005;i++)
-    {
-        printf("%u ",a[i]);
-        if(i%10==9)puts("");
-    }
+    u2 a[10000];
+    u2 b[10000];
+    u2 c[10000];
+    for(int i=0;i<5000;i++)
+        a[i]=b[i]=(i&16)==0?(i&~32)+1:0,c[i]=0;
+    
+    NTT_simple::mul(a,b,16,16,c);
+    debug_print_arr(c,32);
+
+
+    // MF::arr_to_mf(a,a,64);
+    // //for(int i=0;i<64;i++)
+    //     //a[i]=MF::to_mf(a[i]);
+    // MF::arr_to_mf(b,b,64);
+
+    // u2 ri=ZF::pow((1ull<<32)%mod,mod-2);
+    // printf("ri=%u\n",ri);
+    // Pack<VU32x8,4> va,vb,t;
+    // VU32x8 vmod,vmodp;
+    // MF::get_mod(vmod);
+    // MF::get_modp(vmodp);
+    // for(int i=0;i<64;i+=32)
+    // {
+    //     va.loadu(a+i);
+    //     vb.loadu(b+i);
+    //     MF::mul_3<4,false>(va,vb,t,vmod,vmodp);
+    //     va.storeu(a+i);
+    // }
+
+    // MF::arr_to_zf(a,a,64);
+    // debug_print_arr(a,64);
+    
+    // for(int i=0;i<64;i++)
+    // {
+    //     u2 out=(u3)(i+1)*10000000;
+    //     out=(u3)out*out%mod;
+    //     printf("%u ",out);
+    //     if(i%8==7)puts("");
+    // }
+
+    Ntt ntt;
+    ntt.mul(a,b,c,64*64);
+
+    puts("\nmul_fast ans:\n");
+    debug_print_arr(c,64);
 }
 
 
 
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 {
-    Pack<VU32x8,4> x,y,t;
-    VU32x8 vmod=set1(mod),vmodp=set1(Mogo_F::modp);
-    for(int j=0;j<1024*1024;j++)
-    for(int i=0;i<1024;i+=32)
-    {
-        x.loadu(a+i);
-        y.loadu(b+i);
-        Mogo_F::mul_3<4,false>(x,y,t,vmod,vmodp);
-        x.storeu(a+i);
-    }
+
+    static int i=(test(),0);
+    // Pack<VU32x8,4> x,y,t;
+    // VU32x8 vmod=set1(mod),vmodp=set1(Mogo_F::modp);
+    // for(int j=0;j<1024*1024;j++)
+    // for(int i=0;i<1024;i+=32)
+    // {
+    //     x.loadu(a+i);
+    //     y.loadu(b+i);
+    //     Mogo_F::mul_3<4,false>(x,y,t,vmod,vmodp);
+    //     x.storeu(a+i);
+    // }
 }
 
 /*
