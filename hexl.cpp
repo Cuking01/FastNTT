@@ -29,15 +29,15 @@ int main() {
 
     // 对 poly1 和 poly2 执行前向 NTT
 
-
-
-    for(int j=0;j<10;j++)
-    {
-        for(size_t i=0;i<poly_degree;i++)
+    for(size_t i=0;i<poly_degree;i++)
         {
             poly1[i]=i<poly_degree/2?i:0;
             poly2[i]=i<poly_degree/2?i:0;
         }
+
+    for(int j=0;j<10;j++)
+    {
+        
 
         ntt.ComputeForward(poly1.data(), poly1.data(), modulus, 1); // inplace 计算
         ntt.ComputeForward(poly2.data(), poly2.data(), modulus, 1); // inplace 计算

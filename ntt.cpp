@@ -79,9 +79,24 @@ struct Mogo_F
     template<u2 n>
     ALWAYS_INLINE static void jmod(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> tmp,const VU32x8&vmod)
     {
-        tmp=a.template as<VI32x8>() > vmod.template as<VI32x8>();
-        tmp=tmp&vmod;
-        a=a-tmp;
+        tmp=a-vmod;
+        a=min(a,tmp);
+    }
+
+    template<u2 n>
+    ALWAYS_INLINE static void jmodadd(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> b,const VU32x8&vmod)
+    {
+        a=a+b;
+        b=a-vmod;
+        a=min(a,b);
+    }
+
+    template<u2 n>
+    ALWAYS_INLINE static void jmodsub(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> b,const VU32x8&vmod)
+    {
+        a=a-b;
+        b=a+vmod;
+        a=min(a,b);
     }
 
     template<u2 n,bool j_mod=true>
@@ -268,14 +283,50 @@ ALWAYS_INLINE void Transpose(Pack_Ref<VU32x8,8> mat,Pack_Ref<VU32x8,8> tmp)
     mat[1,3,5,7]=unpackhi(tmp[0,2,4,6],tmp[1,3,5,7]);
 }
 
-void debug_print_arr(u2*a,u3 len)
-{
-    for(u3 i=0;i<len;i++)
-    {
-        printf("%10u ",a[i]);
-        if(i%8==7)puts("");
-    }
-}
+// void debug_print_arr(u2*a,u3 len)
+// {
+//     for(u3 i=0;i<len;i++)
+//     {
+//         printf("%10u ",a[i]);
+//         if(i%8==7)puts("");
+//     }
+// }
+
+
+// void debug_print_arr_raw(u2*a,u3 len)
+// {
+//     for(u3 i=0;i<len;i++)
+//     {
+//         printf("%10u ",MF::to_zf(a[i]));
+//         if(i%8==7)puts("");
+//     }
+// }
+
+// template<u2 n>
+// void debug_print(Pack_Ref<VU32x8,n> data)
+// {
+//     alignas(64) u2 tmp[n*8];
+//     data.store(tmp);
+
+//     for(u3 i=0;i<n*8;i++)
+//     {
+//         printf("%10u ",tmp[i]);
+//         if(i%8==7)puts("");
+//     }
+// }
+
+// template<u2 n>
+// void debug_print_raw(Pack_Ref<VU32x8,n> data)
+// {
+//     alignas(64) u2 tmp[n*8];
+//     data.store(tmp);
+
+//     for(u3 i=0;i<n*8;i++)
+//     {
+//         printf("%10u ",MF::to_zf(tmp[i]));
+//         if(i%8==7)puts("");
+//     }
+// }
 
 struct Ntt
 {
@@ -298,7 +349,7 @@ struct Ntt
     alignas(64) u2 w32[16];
     alignas(64) u2 wi32[16];
 
-    static constexpr u3 w_max_len=1ull<<20;
+    static constexpr u3 w_max_len=1ull<<21;
 
     alignas(64) static inline u2 w[w_max_len];
     alignas(64) static inline u2 wi[w_max_len];
@@ -326,7 +377,7 @@ struct Ntt
             {
                 vw.store(w+i+j);
                 y=vw32;
-                MF::mul_3<4>(vw,vw32,t,vmod,vmodp);
+                MF::mul_3<4>(vw,y,t,vmod,vmodp);
             }
             
 
@@ -341,65 +392,63 @@ struct Ntt
             {
                 vw.store(wi+i+j);
                 y=vw32;
-                MF::mul_3<4>(vw,vw32,t,vmod,vmodp);
+                MF::mul_3<4>(vw,y,t,vmod,vmodp);
             }
         }
     }
 
     Ntt()
     {
-        u2 W,Wi;
-        for(u3 i=0;i<8;i++)
-            w2[i]=1,wi2[i]=1;
-        W=ZF::pow(g,(mod-1)/4);
-        Wi=ZF::pow(gi,(mod-1)/4);
-        for(u3 i=0;i<8;i+=2)
-        {
-            w4[i]=1,wi4[i]=1;
-            for(u3 j=1;j<2;j++)
-                w4[i+j]=(u3)w4[i+j-1]*W%mod,wi4[i+j]=(u3)wi4[i+j-1]*Wi%mod;
-        }
+        // u2 W,Wi;
+        // for(u3 i=0;i<8;i++)
+        //     w2[i]=1,wi2[i]=1;
+        // W=ZF::pow(g,(mod-1)/4);
+        // Wi=ZF::pow(gi,(mod-1)/4);
+        // for(u3 i=0;i<8;i+=2)
+        // {
+        //     w4[i]=1,wi4[i]=1;
+        //     for(u3 j=1;j<2;j++)
+        //         w4[i+j]=(u3)w4[i+j-1]*W%mod,wi4[i+j]=(u3)wi4[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/8);
-        Wi=ZF::pow(gi,(mod-1)/8);
-        for(u3 i=0;i<8;i+=4)
-        {
-            w8[i]=1,wi8[i]=1;
-            for(u3 j=1;j<4;j++)
-                w8[i+j]=(u3)w8[i+j-1]*W%mod,wi8[i+j]=(u3)wi8[i+j-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/8);
+        // Wi=ZF::pow(gi,(mod-1)/8);
+        // for(u3 i=0;i<8;i+=4)
+        // {
+        //     w8[i]=1,wi8[i]=1;
+        //     for(u3 j=1;j<4;j++)
+        //         w8[i+j]=(u3)w8[i+j-1]*W%mod,wi8[i+j]=(u3)wi8[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/16);
-        Wi=ZF::pow(gi,(mod-1)/16);
-        for(u3 i=0;i<8;i+=8)
-        {
-            w16[i]=1,wi16[i]=1;
-            for(u3 j=1;j<8;j++)
-                w16[i+j]=(u3)w16[i+j-1]*W%mod,wi16[i+j]=(u3)wi16[i+j-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/16);
+        // Wi=ZF::pow(gi,(mod-1)/16);
+        // for(u3 i=0;i<8;i+=8)
+        // {
+        //     w16[i]=1,wi16[i]=1;
+        //     for(u3 j=1;j<8;j++)
+        //         w16[i+j]=(u3)w16[i+j-1]*W%mod,wi16[i+j]=(u3)wi16[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/32);
-        Wi=ZF::pow(gi,(mod-1)/32);
-        w32[0]=1;
-        wi32[0]=1;
-        for(u3 i=1;i<16;i++)
-        {
-            w32[i]=(u3)w32[i-1]*W%mod;
-            wi32[i]=(u3)wi32[i-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/32);
+        // Wi=ZF::pow(gi,(mod-1)/32);
+        // w32[0]=1;
+        // wi32[0]=1;
+        // for(u3 i=1;i<16;i++)
+        // {
+        //     w32[i]=(u3)w32[i-1]*W%mod;
+        //     wi32[i]=(u3)wi32[i-1]*Wi%mod;
+        // }
 
-        MF::arr_to_mf(w2,w2,8);
-        MF::arr_to_mf(wi2,wi2,8);
-        MF::arr_to_mf(w4,w4,8);
-        MF::arr_to_mf(wi4,wi4,8);
-        MF::arr_to_mf(w8,w8,8);
-        MF::arr_to_mf(wi8,wi8,8);
-        MF::arr_to_mf(w16,w16,8);
-        MF::arr_to_mf(wi16,wi16,8);
-        MF::arr_to_mf(w32,w32,16);
-        MF::arr_to_mf(wi32,wi32,16);
-
-        re_w_len();
+        // MF::arr_to_mf(w2,w2,8);
+        // MF::arr_to_mf(wi2,wi2,8);
+        // MF::arr_to_mf(w4,w4,8);
+        // MF::arr_to_mf(wi4,wi4,8);
+        // MF::arr_to_mf(w8,w8,8);
+        // MF::arr_to_mf(wi8,wi8,8);
+        // MF::arr_to_mf(w16,w16,8);
+        // MF::arr_to_mf(wi16,wi16,8);
+        // MF::arr_to_mf(w32,w32,16);
+        // MF::arr_to_mf(wi32,wi32,16);
 
     }
 
@@ -417,13 +466,315 @@ struct Ntt
        ----------------------------------------------------------------------------------------- group_0
     */
 
-    //先转成蒙哥马利域，然后进行正变换的前min(9,layer-5)层，
+    void dif6_raidx4(u2*a)
+    {
+        Pack<VU32x8,2> vx0,vx1,vx2,vx3,vt0,vt1,vw;
+        VU32x8 vmod,vmodp;
+
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+
+        u3 len=1ull<<layer;
+        for(u3 l=0;l<6;l+=2)
+        {
+            u3 i=len>>(l+2);
+
+            for(u3 j=0;j<len;j+=i*4)
+            {
+                u2*px0=a+j;
+                u2*px1=a+j+i;
+                u2*px2=a+j+i*2;
+                u2*px3=a+j+i*3;
+                u2*pw=w+i*2;
+                for(u3 k=0;k<i;k+=16)
+                {
+                    vx0.load(px0+k);
+                    vx2.load(px2+k);
+                    vw.load(pw+2*k);
+                    vx1.load(px1+k);
+                    vx3.load(px3+k);
+                    // _mm_prefetch(px0+k+32,_MM_HINT_T0);
+                    // _mm_prefetch(px1+k+32,_MM_HINT_T0);
+                    // _mm_prefetch(px2+k+32,_MM_HINT_T0);
+                    // _mm_prefetch(px3+k+32,_MM_HINT_T0);
+                    // _mm_prefetch(pw+k+32,_MM_HINT_T0);
+                    // _mm_prefetch(pw+k*2+32,_MM_HINT_T0);
+                    // _mm_prefetch(pw+k*3+32,_MM_HINT_T0);
+
+                    // if(k%64==0)
+                    // {
+                    //     _mm_prefetch(px0+k+64,_MM_HINT_T0);
+                    //     _mm_prefetch(px1+k+64,_MM_HINT_T0);
+                    //     _mm_prefetch(px2+k+64,_MM_HINT_T0);
+                    //     _mm_prefetch(px3+k+64,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k+64,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*2+64,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*3+64,_MM_HINT_T0);
+
+                    //     _mm_prefetch(px0+k+80,_MM_HINT_T0);
+                    //     _mm_prefetch(px1+k+80,_MM_HINT_T0);
+                    //     _mm_prefetch(px2+k+80,_MM_HINT_T0);
+                    //     _mm_prefetch(px3+k+80,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k+80,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*2+80,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*3+80,_MM_HINT_T0);
+
+                    //     _mm_prefetch(px0+k+96,_MM_HINT_T0);
+                    //     _mm_prefetch(px1+k+96,_MM_HINT_T0);
+                    //     _mm_prefetch(px2+k+96,_MM_HINT_T0);
+                    //     _mm_prefetch(px3+k+96,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k+96,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*2+96,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*3+96,_MM_HINT_T0);
+
+                    //     _mm_prefetch(px0+k+112,_MM_HINT_T0);
+                    //     _mm_prefetch(px1+k+112,_MM_HINT_T0);
+                    //     _mm_prefetch(px2+k+112,_MM_HINT_T0);
+                    //     _mm_prefetch(px3+k+112,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k+112,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*2+112,_MM_HINT_T0);
+                    //     _mm_prefetch(pw+k*3+112,_MM_HINT_T0);
+                    // }
+                    
+                    
+                    vmod=vmod<<cint<1>;
+
+                    auto trans=[&vt0,&vt1,&vmod] ALWAYS_INLINE_LAMBDA (auto&va,auto&vb)
+                    {
+                        vt0=va;
+                        vt1=vb;
+                        MF::jmodadd<2>(va,vt1,vmod);
+                        MF::jmodsub<2>(vt0,vb,vmod);
+                        vb=vt0;
+                    };
+
+                    auto trans2=[&vt0,&vt1,&vmod] ALWAYS_INLINE_LAMBDA (auto&va,auto&vb)
+                    {
+                        vt0=va;
+                        vt1=vb;
+                        MF::jmodsub<2>(va,vt1,vmod);
+                        MF::jmodadd<2>(vt0,vb,vmod);
+                        vb=vt0;
+                    };
+
+                    trans(vx0,vx2);
+                    trans(vx1,vx3);
+                    trans(vx0,vx1);
+                    trans2(vx2,vx3);
+
+                    vmod=vmod<<cint<1>;
+                    MF::mul_4<2,false>(vx1,vw,vt0,vt1,vmod,vmodp);
+                    vw.load(pw+k);
+                    vx0.store(px0+k);
+                    vx0.load(pw+k*3);
+                    vx1.store(px1+k);
+
+                    MF::mul_3<4,false>(Pack_Ref(vx2,vx3),Pack_Ref(vw,vx0),Pack_Ref(vt0,vt1),vmod,vmodp);
+                    vx2.store(px2+k);
+                    vx3.store(px3+k);
+
+                    // MF::mul_4<2,false>(vx2,vw,vt0,vt1,vmod,vmodp);
+                    // vw.load(pw+k*3);
+                    // vx2.store(px2+k);
+                    // MF::mul_4<2,false>(vx3,vw,vt0,vt1,vmod,vmodp);
+                    // vx3.store(px3+k);
+                }
+            }
+        }
+    }
+
+
+    void dif6(u2*a)
+    {
+        Pack<VU32x8,2> vx0,vy0,vx1,vy1,vt0,vt1,vw;
+        VU32x8 vmod,vmodp;
+
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+
+        u3 len=1ull<<layer;
+        for(u3 l=0;l<6;l+=2)
+        {
+            u3 i=len>>(l+2);
+
+            for(u3 j=0;j<len;j+=i*4)
+            {
+                u2*px0=a+j;
+                u2*py0=a+j+i;
+                u2*px1=a+j+i*2;
+                u2*py1=a+j+i*3;
+                u2*pw=w;
+                for(u3 k=0;k<i;k+=16)
+                {
+                    vx0.load(px0+k);
+                    vx1.load(px1+k);
+                    vw.load(pw+i*2+k);
+                    vy0.load(py0+k);
+                    vy1.load(py1+k);
+                    _mm_prefetch(px0+k+32,_MM_HINT_T0);
+                    _mm_prefetch(py0+k+32,_MM_HINT_T0);
+                    _mm_prefetch(px1+k+32,_MM_HINT_T0);
+                    _mm_prefetch(py1+k+32,_MM_HINT_T0);
+                    _mm_prefetch(pw+i+k+32,_MM_HINT_T0);
+                    _mm_prefetch(pw+i*2+k+32,_MM_HINT_T0);
+                    _mm_prefetch(pw+i*3+k+32,_MM_HINT_T0);
+                    
+                    vt0=vx0+vx1;
+                    vt1=vx0-vx1;
+                    MF::mul_4<2,false>(vt1,vw,vx0,vx1,vmod,vmodp);
+                    vw.load(pw+i*2+k+i);
+
+                    vmod=vmod<<cint<1>;
+                    MF::jmod<2>(vt0,vx0,vmod);
+                    vmod=vmod>>cint<1>;
+                    vx0=vt0;     //4p
+                    vx1=vt1;     //2p
+
+                    vt0=vy0+vy1;
+                    vt1=vy0-vy1;
+                    MF::mul_4<2,false>(vt1,vw,vy0,vy1,vmod,vmodp);
+                    vw.load(pw+i+k);
+                    vmod=vmod<<cint<1>;
+                    MF::jmod<2>(vt0,vy0,vmod);
+                    vmod=vmod>>cint<1>;
+                    vy0=vt0;     //4p
+                    vy1=vt1;     //2p
+
+                    vt0=vx0+vy0; //8p
+                    vt1=vx0-vy0;
+                    MF::mul_4<2,false>(vt1,vw,vx0,vy0,vmod,vmodp);
+                    vw.load(pw+i+k);
+                    vmod=vmod<<cint<1>;
+                    MF::jmod<2>(vt0,vx0,vmod);
+                    vmod=vmod>>cint<1>;
+                    vx0=vt0;
+                    vy0=vt1;
+
+                    vt0=vx1+vy1;
+                    vt1=vx1-vy1;
+                    MF::mul_4<2,false>(vt1,vw,vx1,vy1,vmod,vmodp);
+                    vmod=vmod<<cint<1>;
+                    MF::jmod<2>(vt0,vx1,vmod);
+                    vx1=vt0;
+                    vy1=vt1;
+
+                    vx0.store(px0+k);
+                    vx1.store(px1+k);
+                    vy0.store(py0+k);
+                    vy1.store(py1+k);
+                }
+            }
+        }
+    }
+
+    //进行正变换的前9层(仅当层数至少14层时执行，否则直接跳过)
     //分成group_num组，每组内分别计算完成再计算下一组，保证全在L2内
     void trans_step1(u2*a)
     {
+        if(layer<14)return;
+        static constexpr u3 m=6;
+        static constexpr u3 S=256;
+        static constexpr u3 tlen=S*(1ull<<m);
+
+        alignas(64) u2 tmp[tlen];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
+        alignas(64) u2 tmp_w[tlen];
+
+        const u3 group_num=1ull<<(layer-m);
+        const u3 len=1ull<<layer;
+
+        Pack<VU32x8,4> vt;
+        Pack<VU32x8,4>vx,vy;
+        VU32x8 vmod,vmodp,vmod2;
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+        vmod2=vmod<<cint<1>;
+
+        auto butterfly=[&]<bool write_w> ALWAYS_INLINE_LAMBDA (
+            const u2*x0_in,const u2*x1_in,
+            u2*x0_out,u2*x1_out,
+            const u2*w_in,u2*w_out,
+            const u2*w1_in,u2*w1_out
+            )
+        {
+            vx.load(x0_in);
+            vy.load(x1_in);
+
+            vt=vy;
+            vy=vx-vy;
+            MF::jmodadd<4>(vx,vt,vmod2);
+            vt.load(w_in);
+            vx.store(x0_out);
+            
+            vy=vy+vmod2;
+            if constexpr(write_w)
+            {
+                vt.store(w_out);
+            }
+            MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
+            vy.store(x1_out);
+            if constexpr(write_w)
+            {
+                vt.load(w1_in);
+                vt.store(w1_out);
+            }
+        };
+
+        for(u3 r=0;r<group_num;r+=S)
+        {
+            for(u3 j=0;j<(1ull<<(m-1));j++)
+            {
+                u2*px0=a+j*group_num;
+                u2*px1=a+j*group_num+(len>>1);
+                u2*tx0=tmp+j*S;
+                u2*tx1=tmp+j*S+(tlen>>1);
+                u2*pw=w+(len>>1)+j*group_num;
+                u2*tw=tmp_w+(tlen>>1)+j*S;
+                u2*pw1=w+j*group_num;
+                u2*tw1=tmp_w+j*S;
+
+                for(u3 k=0;k<S;k+=32)
+                    butterfly.operator()<true>(px0+k,px1+k,tx0+k,tx1+k,pw,tw,pw1,tw1);
+            }
+
+            for(u3 l=1;l<m-1;l++)
+            {
+                u3 i=1ull<<(layer-l-1);
+                u3 ip=i/group_num*S;
+                
+                for(u3 j=0;j<tlen;j+=ip<<1)
+                {
+                    auto w=this->w;
+                    for(u3 k=0;k<ip;k+=32)
+                    {
+                        butterfly.operator()<false>(tmp+j+k,tmp+j+k+ip,tmp+j+k,tmp+j+k+ip,tmp_w+ip+k,tmp_w+ip+k,nullptr,nullptr);
+                    }
+                }
+            }
+
+            u3 i=1ull<<(layer-m);
+            u3 ip=i/group_num*S;
+            
+            for(u3 j=0;j<tlen;j+=ip<<1)
+            {
+                auto w=this->w;
+                for(u3 k=0;k<ip;k+=32)
+                {
+                    butterfly.operator()<false>(tmp+j+k,tmp+j+k+ip,a+j/S*group_num+k,a+j/S*group_num+k+i,tmp_w+ip+k,tmp_w+ip+k,nullptr,nullptr);
+                }
+            }
+
+        }
+    }
+
+    //与step1类似，但是进行的是逆变换
+    void trans_step5(u2*a)
+    {
+        if(layer<14)return;
+
         alignas(64) u2 tmp[seg_len*seg_per_group];   //足以装入L2的一个小缓冲区，用来存一个组,且留一些L2的余量给其他地方用
         alignas(64) u2 tmp_w[seg_len*seg_per_group];
-        u3 L=14<layer?9:layer-5;
+       
+        const u3 L=9;
 
         u3 log2_group_num=0;
         while((1ull<<log2_group_num)<group_num)
@@ -432,19 +783,19 @@ struct Ntt
         for(u3 group_id=0;group_id<group_num;group_id++)
         {
             Pack<VU32x8,4> vt;
-            for(u3 j=0;j<seg_per_group;j++)
-            {
-                vt.load(a+(j*group_num+group_id)*seg_len);
-                vt.store(tmp+j*seg_len);
-            }
-            for(u3 j=1;j<seg_per_group;j<<=1)
-            {
-                for(u3 k=0;k<j;k++)
-                {
-                    vt.load(w+((j+k)*group_num+group_id)*seg_len);
-                    vt.store(tmp_w+(j+k)*seg_len);
-                }
-            }
+            // for(u3 j=0;j<seg_per_group;j++)
+            // {
+            //     vt.load(a+(j*group_num+group_id)*seg_len);
+            //     vt.store(tmp+j*seg_len);
+            // }
+            // for(u3 j=1;j<seg_per_group;j<<=1)
+            // {
+            //     for(u3 k=0;k<j;k++)
+            //     {
+            //         vt.load(wi+((j+k)*group_num+group_id)*seg_len);
+            //         vt.store(tmp_w+(j+k)*seg_len);
+            //     }
+            // }
 
             Pack<VU32x8,4>vx,vy;
             VU32x8 vmod,vmodp,vmod2;
@@ -452,31 +803,41 @@ struct Ntt
             MF::get_modp(vmodp);
             vmod2=vmod<<cint<1>;
 
-            for(u3 l=0;l<L;l++)
+            for(u3 l=L;l--;)
             {
                 u3 i=1ull<<(layer-l-1);
                 u3 ip=i/group_num;
 
+
+
                 for(u3 j=0;j<seg_len*seg_per_group;j+=ip<<1)
                 {
+                    auto w=this->w;
                     for(u3 k=0;k<ip;k+=32)
                     {
-                        vx.load(tmp+j+k);
-                        vy.load(tmp+j+k+ip);
+                        vy.load(a+j+k+ip);
+                        vt.load(w+ip+k);
+                        MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
+                        vx.load(a+j+k);
 
                         vt=vx+vy;
                         vy=vx-vy;
-                        MF::jmod<4>(vt,vx,vmod2);
-                        vt.store(tmp+j+k);
-
-                        vt.load(tmp_w+ip+k);
-                        
                         vy=vy+vmod2;
-                        MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
-                        vy.store(tmp+j+k+ip);
+
+                        MF::jmod<4>(vt,vx,vmod2);
+                        MF::jmod<4>(vy,vx,vmod2);
+
+                        vt.store(a+j+k);
+                        vy.store(a+j+k+ip);
                     }
                 }
             }
+
+            // for(u3 j=0;j<seg_per_group;j++)
+            // {
+            //     vt.load(tmp+j*seg_len);
+            //     vt.store(a+(j*group_num+group_id)*seg_len);
+            // }
         }
     }
 
@@ -485,7 +846,94 @@ struct Ntt
     //保证一直在L2内（实际可以保证在L1内，但影响不大）
     void trans_step2(u2*a)
     {
-        
+        const u3 L_l=5,L_r=layer>=14?layer-6:layer;    //变换的层数范围。
+        const u3 seg_per_group=this->group_num>0?this->seg_per_group:1;
+        const u3 group_num=this->group_num>0?this->group_num:(1ull<<layer)/seg_len;
+
+        Pack<VU32x8,4>vx,vy,vt;
+        VU32x8 vmod,vmodp,vmod2;
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+        vmod2=vmod<<cint<1>;
+
+        for(u3 sid=0;sid<seg_per_group;sid++) //枚举大段
+        {
+            u2*sp=a+sid*group_num*seg_len;    //大段首地址
+            for(u3 j=0;j<group_num*seg_len;j+=64)
+            {
+                u2*nxt=sp+group_num*seg_len;
+                _mm_prefetch(nxt+j+0,_MM_HINT_T0);
+                _mm_prefetch(nxt+j+16,_MM_HINT_T0);
+                _mm_prefetch(nxt+j+32,_MM_HINT_T0);
+                _mm_prefetch(nxt+j+48,_MM_HINT_T0);
+
+            }
+            for(u3 l=L_r;l>L_l;l--)
+            {
+                u3 i=1ull<<(l-1);
+                for(u3 j=0;j<group_num*seg_len;j+=i<<1)
+                {
+                    for(u3 k=0;k<i;k+=32)
+                    {
+                        vx.load(sp+j+k);
+                        vy.load(sp+j+k+i);
+
+                        vt=vx+vy;
+                        vy=vx-vy;
+                        MF::jmod<4>(vt,vx,vmod2);
+                        vt.store(sp+j+k);
+                        vt.load(w+i+k);
+                        vy=vy+vmod2;
+                        MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
+                        vy.store(sp+j+k+i);
+                    }
+                }
+            }
+        }
+    }
+
+    //与step2类似，但是进行的是逆变换
+    void trans_step4(u2*a)
+    {
+        const u3 L_l=5,L_r=layer>=14?layer-9:layer;    //变换的层数范围。
+        const u3 seg_per_group=this->group_num>0?this->seg_per_group:1;
+        const u3 group_num=this->group_num>0?this->group_num:(1ull<<layer)/seg_len;
+
+        Pack<VU32x8,4>vx,vy,vt;
+        VU32x8 vmod,vmodp,vmod2;
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+        vmod2=vmod<<cint<1>;
+
+        for(u3 sid=0;sid<seg_per_group;sid++) //枚举大段
+        {
+            u2*sp=a+sid*group_num*seg_len;    //大段首地址
+            
+            for(u3 l=L_l+1;l<=L_r;l++)
+            {
+                u3 i=1ull<<(l-1);
+                for(u3 j=0;j<group_num*seg_len;j+=i<<1)
+                {
+                    for(u3 k=0;k<i;k+=32)
+                    {
+                        vy.load(sp+j+k+i);
+                        vt.load(wi+i+k);
+                        MF::mul_3<4,false>(vy,vt,vx,vmod,vmodp);
+                        vx.load(sp+j+k);
+
+                        vt=vx+vy;
+                        vy=vx-vy;
+                        vy=vy+vmod2;
+
+                        MF::jmod<4>(vt,vx,vmod2);
+                        MF::jmod<4>(vy,vx,vmod2);
+
+                        vt.store(sp+j+k);
+                        vy.store(sp+j+k+i);
+                    }
+                }
+            }
+        }
     }
 
     //对每个a和b的对应小段先进行最后5层正变换，然后乘起来，再进行5次逆变换后存入c中
@@ -729,44 +1177,66 @@ struct Ntt
         }
     }
 
-    //与step2类似，但是进行的是逆变换
-    void trans_step4(u2*a)
+    //除以len并转回普通整数，并清理掉等于模数的值。
+    void trans_step6(u2*a)
     {
+        u3 len=1ull<<layer;
 
+        u2 inv=ZF::pow(len,mod-2);
+        VU32x8 vinv=set1(inv);
+
+        Pack<VU32x8,4> vx,vy,vt;
+        VU32x8 vmod,vmodp;
+
+        MF::get_mod(vmod);
+        MF::get_modp(vmodp);
+
+        for(u3 i=0;i<len;i+=32)
+        {
+            vx.load(a+i);
+            vy=vinv;
+            MF::mul_3<4>(vx,vy,vt,vmod,vmodp);
+            vt=vx==vmod;
+            vt=vt&vmod;
+            vx=vx-vt;
+            vx.store(a+i);
+        }
     }
 
-    //与step1类似，但是进行的是逆变换
-    void trans_step5(u2*a)
-    {
-
-    }
+    
 
     void mul(u2*a,u2*b,u2*c,u3 len)
     {
+        //cu_assert(len>=64,"ntt length must >=64");
+
+        //re_w_len(len);
+
         u3 k=5;
         while((1ull<<k)<len)k++;
         len=1ull<<k;
 
         layer=k;
         group_num=len/(seg_per_group*seg_len);
-        MF::arr_to_mf(a,a,len);
-        MF::arr_to_mf(b,b,len);
-        int st=clock();
-        for(int i=0;i<100000;i++)
-            trans_step3(a,b,c);
-        int ed=clock();
-        printf("\n\ntime=%d\n",ed-st);
-        u2 inv=ZF::pow(len,mod-2);
-        inv=MF::to_mf(inv);
+         //MF::arr_to_mf(a,a,len);
+         //MF::arr_to_mf(b,b,len);
 
-        for(u3 i=0;i<len;i++)
-            c[i]=MF::mul(c[i],inv);
-        MF::arr_to_zf(c,c,len);
+        dif6_raidx4(a);
+        //dif6(a);
+         //trans_step1(a);
+         //trans_step2(a);
+         //trans_step1(b);
+         //trans_step2(b);
+        //trans_step3(a,b,c);
+         //trans_step4(c);
+         //trans_step5(c);
+
+        //trans_step6(c);
+     
     }
 };
 
 
-
+/*
 
 namespace NTT_simple
 {
@@ -814,13 +1284,14 @@ namespace NTT_simple
             a[i]=(u3)a[i]*inv%mod;
     }
 
-    u2 ta[10000];
-    u2 tb[10000];
+    static inline u2 ta[1<<21];
+    static inline u2 tb[1<<21];
 
     void mul(u2*a,u2*b,u3 lena,u3 lenb,u2*c)
     {
         u3 len=lena+lenb-1;
         u3 k=32;
+        while(k<len)k<<=1;
         memset(ta,0,sizeof(u2)*k);
         memset(tb,0,sizeof(u2)*k);
         memcpy(ta,a,sizeof(u2)*lena);
@@ -840,69 +1311,56 @@ namespace NTT_simple
 
 void test()
 {
-    u2 a[10000];
-    u2 b[10000];
-    u2 c[10000];
-    for(int i=0;i<5000;i++)
-        a[i]=b[i]=(i&16)==0?(i&~32)+1:0,c[i]=0;
+    static u2 a[1<<21];
+    static u2 b[1<<21];
+    static u2 c[1<<21];
+    memset(a,0,sizeof(a));
+    memset(b,0,sizeof(b));
+    memset(c,0,sizeof(c));
+    //for(int i=0;i<10000;i++)a[i]=b[i]=(i&16)==0?(i&~32)+1:0;
+    for(int i=0;i<(1ull<<21);i++)a[i]=b[i]=i<(1ull<<20)?i+1:0;
     
-    NTT_simple::mul(a,b,16,16,c);
-    debug_print_arr(c,32);
+    NTT_simple::mul(a,b,1<<20,1<<20,c);
+    puts("\nans:\n");
+    debug_print_arr(c+(1<<20),32);
 
-
-    // MF::arr_to_mf(a,a,64);
-    // //for(int i=0;i<64;i++)
-    //     //a[i]=MF::to_mf(a[i]);
-    // MF::arr_to_mf(b,b,64);
-
-    // u2 ri=ZF::pow((1ull<<32)%mod,mod-2);
-    // printf("ri=%u\n",ri);
-    // Pack<VU32x8,4> va,vb,t;
-    // VU32x8 vmod,vmodp;
-    // MF::get_mod(vmod);
-    // MF::get_modp(vmodp);
-    // for(int i=0;i<64;i+=32)
-    // {
-    //     va.loadu(a+i);
-    //     vb.loadu(b+i);
-    //     MF::mul_3<4,false>(va,vb,t,vmod,vmodp);
-    //     va.storeu(a+i);
-    // }
-
-    // MF::arr_to_zf(a,a,64);
-    // debug_print_arr(a,64);
-    
-    // for(int i=0;i<64;i++)
-    // {
-    //     u2 out=(u3)(i+1)*10000000;
-    //     out=(u3)out*out%mod;
-    //     printf("%u ",out);
-    //     if(i%8==7)puts("");
-    // }
 
     Ntt ntt;
-    ntt.mul(a,b,c,64*64);
+    ntt.mul(a,b,c,1ull<<21);
 
     puts("\nmul_fast ans:\n");
-    debug_print_arr(c,64);
+    debug_print_arr(c+(1<<20),32);
 }
-
+*/
 
 
 void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
 {
 
-    static int i=(test(),0);
-    // Pack<VU32x8,4> x,y,t;
-    // VU32x8 vmod=set1(mod),vmodp=set1(Mogo_F::modp);
-    // for(int j=0;j<1024*1024;j++)
-    // for(int i=0;i<1024;i+=32)
-    // {
-    //     x.loadu(a+i);
-    //     y.loadu(b+i);
-    //     Mogo_F::mul_3<4,false>(x,y,t,vmod,vmodp);
-    //     x.storeu(a+i);
-    // }
+    //static int i=(test(),0);
+    // u3 len=n+m+1;
+    // u3 k=1;
+    // while(k<len)k<<=1;
+
+    // u2*at=(u2*)aligned_alloc(k*4,64);
+    // u2*bt=(u2*)aligned_alloc(k*4,64);
+    // u2*ct=(u2*)aligned_alloc(k*4,64);
+
+    // memcpy(at,a,(n+1)*4);
+    // memset(at+n+1,0,(k-n-1)*4);
+    // memcpy(bt,b,(n+1)*4);
+    // memset(bt+m+1,0,(k-m-1)*4);
+    // memset(ct,0,k*4);
+
+    Ntt ntt;
+    ntt.mul(a,b,c,n+m+1);
+
+    //memcpy(c,ct,(n+m+1)*4);
+    // aligned_free(at);
+    // aligned_free(bt);
+    // aligned_free(ct);
+
+    //aligned_alloc()
 }
 
 /*
