@@ -1506,7 +1506,7 @@ namespace hint
                     using ModIntType = MontInt32Lazy<MOD>;
                     using ModIntX8 = MontInt32X8<ModIntType>;
 
-                    static constexpr size_t L1_BYTE = size_t(1) << 2; // 32KB L1 cache size, change this if you know your cache size.
+                    static constexpr size_t L1_BYTE = size_t(1) << 17; // 32KB L1 cache size, change this if you know your cache size.
                     static constexpr size_t LONG_THRESHOLD = std::min(L1_BYTE / sizeof(ModIntType), NTT_MAX_LEN);
                     using NTTTemplate = NTTShort<LONG_THRESHOLD, root(), ModIntType>;
 
