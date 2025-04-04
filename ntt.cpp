@@ -75,7 +75,6 @@ struct Mogo_F
         return mul(x,1);
     }
 
-    //结果应该为0时可能得到结果为mod。
     template<u2 n>
     ALWAYS_INLINE static void jmod(Pack_Ref<VU32x8,n> a,Pack_Ref<VU32x8,n> tmp,const VU32x8&vmod)
     {
@@ -408,56 +407,56 @@ struct Ntt
 
     Ntt()
     {
-        u2 W,Wi;
-        for(u3 i=0;i<8;i++)
-            w2[i]=1,wi2[i]=1;
-        W=ZF::pow(g,(mod-1)/4);
-        Wi=ZF::pow(gi,(mod-1)/4);
-        for(u3 i=0;i<8;i+=2)
-        {
-            w4[i]=1,wi4[i]=1;
-            for(u3 j=1;j<2;j++)
-                w4[i+j]=(u3)w4[i+j-1]*W%mod,wi4[i+j]=(u3)wi4[i+j-1]*Wi%mod;
-        }
+        // u2 W,Wi;
+        // for(u3 i=0;i<8;i++)
+        //     w2[i]=1,wi2[i]=1;
+        // W=ZF::pow(g,(mod-1)/4);
+        // Wi=ZF::pow(gi,(mod-1)/4);
+        // for(u3 i=0;i<8;i+=2)
+        // {
+        //     w4[i]=1,wi4[i]=1;
+        //     for(u3 j=1;j<2;j++)
+        //         w4[i+j]=(u3)w4[i+j-1]*W%mod,wi4[i+j]=(u3)wi4[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/8);
-        Wi=ZF::pow(gi,(mod-1)/8);
-        for(u3 i=0;i<8;i+=4)
-        {
-            w8[i]=1,wi8[i]=1;
-            for(u3 j=1;j<4;j++)
-                w8[i+j]=(u3)w8[i+j-1]*W%mod,wi8[i+j]=(u3)wi8[i+j-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/8);
+        // Wi=ZF::pow(gi,(mod-1)/8);
+        // for(u3 i=0;i<8;i+=4)
+        // {
+        //     w8[i]=1,wi8[i]=1;
+        //     for(u3 j=1;j<4;j++)
+        //         w8[i+j]=(u3)w8[i+j-1]*W%mod,wi8[i+j]=(u3)wi8[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/16);
-        Wi=ZF::pow(gi,(mod-1)/16);
-        for(u3 i=0;i<8;i+=8)
-        {
-            w16[i]=1,wi16[i]=1;
-            for(u3 j=1;j<8;j++)
-                w16[i+j]=(u3)w16[i+j-1]*W%mod,wi16[i+j]=(u3)wi16[i+j-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/16);
+        // Wi=ZF::pow(gi,(mod-1)/16);
+        // for(u3 i=0;i<8;i+=8)
+        // {
+        //     w16[i]=1,wi16[i]=1;
+        //     for(u3 j=1;j<8;j++)
+        //         w16[i+j]=(u3)w16[i+j-1]*W%mod,wi16[i+j]=(u3)wi16[i+j-1]*Wi%mod;
+        // }
 
-        W=ZF::pow(g,(mod-1)/32);
-        Wi=ZF::pow(gi,(mod-1)/32);
-        w32[0]=1;
-        wi32[0]=1;
-        for(u3 i=1;i<16;i++)
-        {
-            w32[i]=(u3)w32[i-1]*W%mod;
-            wi32[i]=(u3)wi32[i-1]*Wi%mod;
-        }
+        // W=ZF::pow(g,(mod-1)/32);
+        // Wi=ZF::pow(gi,(mod-1)/32);
+        // w32[0]=1;
+        // wi32[0]=1;
+        // for(u3 i=1;i<16;i++)
+        // {
+        //     w32[i]=(u3)w32[i-1]*W%mod;
+        //     wi32[i]=(u3)wi32[i-1]*Wi%mod;
+        // }
 
-        MF::arr_to_mf(w2,w2,8);
-        MF::arr_to_mf(wi2,wi2,8);
-        MF::arr_to_mf(w4,w4,8);
-        MF::arr_to_mf(wi4,wi4,8);
-        MF::arr_to_mf(w8,w8,8);
-        MF::arr_to_mf(wi8,wi8,8);
-        MF::arr_to_mf(w16,w16,8);
-        MF::arr_to_mf(wi16,wi16,8);
-        MF::arr_to_mf(w32,w32,16);
-        MF::arr_to_mf(wi32,wi32,16);
+        // MF::arr_to_mf(w2,w2,8);
+        // MF::arr_to_mf(wi2,wi2,8);
+        // MF::arr_to_mf(w4,w4,8);
+        // MF::arr_to_mf(wi4,wi4,8);
+        // MF::arr_to_mf(w8,w8,8);
+        // MF::arr_to_mf(wi8,wi8,8);
+        // MF::arr_to_mf(w16,w16,8);
+        // MF::arr_to_mf(wi16,wi16,8);
+        // MF::arr_to_mf(w32,w32,16);
+        // MF::arr_to_mf(wi32,wi32,16);
 
     }
 
@@ -779,7 +778,11 @@ struct Ntt
 
     void trans_step1_x2(u2*a,u2*t)
     {
-        if(layer<15)return;
+        if(layer<15)
+        {
+            memcpy(t,a,sizeof(u2)<<layer);
+            return;
+        }
         static constexpr u3 m=step1_m;
         static constexpr u3 S=256;
         static constexpr u3 tlen=S*(1ull<<m);
@@ -840,7 +843,10 @@ struct Ntt
                 u2*tw1=tmp_w+j*S;
 
                 for(u3 k=0;k<S;k+=16)
+                {
+                    
                     butterfly.operator()<true>(px0+k,px1+k,tx0+k,tx1+k,pw+k,tw+k,pw1+k,tw1+k);
+                }
             }
 
             for(u3 l=1;l<m-1;l++)
@@ -963,7 +969,11 @@ struct Ntt
     //与step1类似，但是进行的是逆变换
     void trans_step5(u2*a,u2*t)
     {
-        if(layer<15)return;
+        if(layer<15)
+        {
+            memcpy(a,t,sizeof(u2)<<layer);
+            return;
+        }
         static constexpr u3 m=step1_m;
         static constexpr u3 S=256;
         static constexpr u3 tlen=S*(1ull<<m);
@@ -1038,8 +1048,13 @@ struct Ntt
                 u2*pw2=pw1+(len>>1);
                 u2*tw2=tw1+(tlen>>1);
 
+
+
                 for(u3 k=0;k<S;k+=32)
+                {
+                    //prefetch(px1+group_num,_MM_HINT_T0);
                     butterfly.operator()<true>(px0+k,px1+k,tx0+k,tx1+k,pw+k,nullptr,pw1+k,tw1+k,pw2+k,tw2+k);
+                }
             }
             // if(r==0)
             // {
@@ -1093,9 +1108,6 @@ struct Ntt
         }
     }
 
-    //继续正变换，此步进行max(0,layer-14)层变换，每次对相邻的group_num个seg一起做变换，
-    //此时实际上相当于在每个大段上做变换，每个大段变换完成后进行下一个大段的变换，
-    //保证一直在L2内（实际可以保证在L1内，但影响不大）
     void trans_step2(u2*a)
     {
         const u3 L=layer>=15?layer-step1_m:layer;
@@ -1576,7 +1588,7 @@ struct Ntt
             vy=vinv;
             MF::mul_3<4>(vx,vy,vt,vmod,vmodp);
             vx.store(a+i);
-        }
+        }  
     }
 
     
@@ -1589,12 +1601,13 @@ struct Ntt
         len=1ull<<k;
 
         layer=k;
-        re_w_len(len);
+        //re_w_len(len);
          // trans_step1(a);
          // trans_step1(b);
         trans_step1_x2(a,ta);
         trans_step1_x2(b,tb);
          trans_step2_x2(ta);
+
          trans_step2_x2(tb);
 
         trans_step3(ta,tb,tc);
@@ -1725,7 +1738,6 @@ void poly_multiply(unsigned *a, int n, unsigned *b, int m, unsigned *c)
     // memcpy(bt,b,(n+1)*4);
     // memset(bt+m+1,0,(k-m-1)*4);
     // memset(ct,0,k*4);
-
     Ntt ntt;
     ntt.mul(a,b,c,n+m+1);
 

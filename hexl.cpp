@@ -3,14 +3,16 @@
 #include <vector>
 #include <cmath>
 #include<time.h>
-int main() {
+
+double test_one(int len,int times)
+{
     using namespace intel::hexl;
 
     // 模数 q，通常选择满足 (q - 1) 是 2 的幂的素数
     uint64_t modulus = 998244353; // 示例模数，满足 (q-1) = 2^p
 
     // 多项式的长度（必须是 2 的幂）
-    size_t poly_degree = 1<<21;
+    size_t poly_degree = len;
 
     // 定义两个多项式（填充为 2 的幂长度）
     std::vector<uint64_t> poly1(poly_degree);// = {1, 2, 3, 4, 0, 0, 0, 0};
@@ -25,7 +27,7 @@ int main() {
     // 根数 = 3，modulus 是一个满足要求的素数
     NTT ntt(poly_degree, modulus);
 
-    int start=clock();
+    
 
     // 对 poly1 和 poly2 执行前向 NTT
 
@@ -35,7 +37,9 @@ int main() {
             poly2[i]=i<poly_degree/2?i:0;
         }
 
-    for(int j=0;j<10;j++)
+    int start=clock();
+
+    for(int j=0;j<times;j++)
     {
         
 
@@ -44,23 +48,63 @@ int main() {
 
 
         EltwiseMultMod(result.data(),poly1.data(),poly2.data(),poly_degree,modulus,1);
-        // // 在 NTT 空间执行逐点乘法
-        // for (size_t i = 0; i < poly_degree; ++i) {
-        //     result[i] = MultiplyMod(poly1[i], poly2[i], modulus);
-        // }
-
-        // 对结果执行逆向 NTT
+        
         ntt.ComputeInverse(result.data(), result.data(), modulus, 1); // inplace 逆 NTT
     }
 
     
     int end=clock();
-    // 打印最终结果
-    std::cout << "Resultant polynomial: ";
-    for (size_t i = 0; i < poly_degree&&i<20; ++i) {
-        std::cout << result[i] << " ";
+    return (end-start)/1000.0;
+    
+}
+
+void test_mt(int len,int times,int times2)
+{
+    std::vector<double> record(times2);
+
+    for(int i=0;i<1;i++)
+    {
+        test_one(len,times);
     }
-    std::cout << std::endl;
-    printf("\n time=%d\n",end-start);
+
+    for(int i=0;i<times2;i++)
+    {
+        record[i]=test_one(len,times);
+        printf("第%d次：%.2lfms\n",i+1,record[i]);
+    }
+    
+    std::sort(record.begin(),record.end());
+
+    printf("\n最小值 %.2lfms\n",record[0]);
+    printf("最大值 %.2lfms\n\n",record[times2-1]);
+
+    double sum=0;
+
+    for(int i=0;i<record.size();i++)
+        sum+=record[i];
+    double avg=sum/times2;
+    double s2=0;
+    for(int i=0;i<record.size();i++)
+        s2+=(avg-record[i])*(avg-record[i]);
+    
+    s2/=times2-1;
+
+    double s=sqrt(s2);
+    double se=s/sqrt(times2);
+
+    printf("长度=%d 次数=%d\n",len,times);
+
+    printf("平均时间：%.2lfms\n",avg);
+    printf("标准差：%.2lfms\n",s);
+    printf("标准误差：%.2lfms\n\n",se);
+
+    printf("times=%.2lf(%.2lf)ms\n\n\n",avg,se*2);
+}
+
+int main() {
+    
+    test_mt(1<<10,1<<12,30);
+    test_mt(1<<15,1<<7,30);
+    test_mt(1<<20,1<<2,30);
     return 0;
 }
